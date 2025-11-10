@@ -80,7 +80,7 @@ function aggregateForRange(points, rangeMs) {
     const iso = date.toISOString();
     const key = groupByDay
       ? iso.slice(0, 10) // YYYY-MM-DD
-      : iso.slice(0, 13); // YYYY-MM-DDTHH
+      : iso; // keep minute-level precision
     const existing = map.get(key);
     if (!existing || date.getTime() > existing.date.getTime()) {
       map.set(key, point);
