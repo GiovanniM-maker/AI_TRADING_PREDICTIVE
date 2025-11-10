@@ -217,12 +217,18 @@ export default function MarketMinutePage() {
 
   const yDomain = useMemo(() => {
     if (aggregatedHistory.length === 0) return null;
-    const values = aggregatedHistory.map((point) => point.close);
+    const values = aggregatedHistory
+      .map((point) => point.close)
+      .filter((value) => typeof value === "number" && Number.isFinite(value));
+    if (values.length === 0) return null;
     const min = Math.min(...values);
     const max = Math.max(...values);
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-    const padding = (max - min) * 0.05 || Math.abs(min) * 0.01 || 1;
-    return [min - padding, max + padding];
+    if (min === max) {
+      const offset = Math.max(Math.abs(min) * 0.01, 1);
+      return [min - offset, max + offset];
+    }
+    return [min, max];
   }, [aggregatedHistory]);
 
   const change = useMemo(() => {
