@@ -43,7 +43,6 @@ const RANGE_OPTIONS = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
 
 function formatCurrency(value) {
   if (typeof value !== "number") return "-";
@@ -69,18 +68,13 @@ function calcChange(current, reference) {
 function aggregateForRange(points, rangeMs) {
   if (!Array.isArray(points) || points.length === 0) return [];
   const groupByDay = rangeMs > DAY_MS;
-  const groupByHour = rangeMs > HOUR_MS && rangeMs <= DAY_MS;
   const map = new Map();
 
   points.forEach((point) => {
     const date = point?.date instanceof Date ? point.date : null;
     if (!date) return;
     const iso = date.toISOString();
-    const key = groupByDay
-      ? iso.slice(0, 10)
-      : groupByHour
-      ? iso.slice(0, 13)
-      : iso;
+    const key = groupByDay ? iso.slice(0, 10) : iso;
     const existing = map.get(key);
     if (!existing || date.getTime() > existing.date.getTime()) {
       map.set(key, point);
@@ -204,7 +198,6 @@ export default function MarketMinutePage() {
     [history, rangeMs]
   );
   const isDailyAggregation = rangeMs > DAY_MS;
-  const isHourlyAggregation = rangeMs > HOUR_MS && rangeMs <= DAY_MS;
 
   const chartData = useMemo(
     () =>
@@ -212,11 +205,6 @@ export default function MarketMinutePage() {
         time: item.date.toISOString(),
         label: isDailyAggregation
           ? item.date.toLocaleDateString()
-          : isHourlyAggregation
-          ? item.date.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
           : item.date.toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
@@ -364,11 +352,6 @@ export default function MarketMinutePage() {
                       tickFormatter={(value) =>
                         isDailyAggregation
                           ? new Date(value).toLocaleDateString()
-                          : isHourlyAggregation
-                          ? new Date(value).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
                           : new Date(value).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
