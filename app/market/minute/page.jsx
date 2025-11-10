@@ -139,6 +139,10 @@ export default function MarketMinutePage() {
     const now = new Date();
     const start = new Date(now.getTime() - (range?.ms ?? 0));
     const startIso = start.toISOString();
+    const rangeMs = range?.ms ?? DAY_MS;
+    const bucketMs = rangeMs > DAY_MS ? DAY_MS : 60 * 1000;
+    const estimatedPoints = Math.ceil(rangeMs / bucketMs);
+    const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
 
     const historyRef = collection(
       doc(db, "crypto_prices_minute", selectedCoin),
@@ -146,9 +150,9 @@ export default function MarketMinutePage() {
     );
     const historyQuery = query(
       historyRef,
-      orderBy("time", "desc"),
+      orderBy("time", "asc"),
       where("time", ">=", startIso),
-      limit(5000)
+      limit(fetchLimit)
     );
 
     const unsubscribe = onSnapshot(
@@ -165,8 +169,7 @@ export default function MarketMinutePage() {
           .map((item) => ({
             ...item,
             date: new Date(item.time),
-          }))
-          .sort((a, b) => a.date.getTime() - b.date.getTime());
+          }));
 
         setHistory(points);
         setLoading(false);

@@ -151,6 +151,14 @@ export default function MarketDetailsPage() {
     const now = new Date();
     const start = new Date(now.getTime() - (range?.ms ?? 0));
     const startIso = start.toISOString();
+    const rangeMs = range?.ms ?? DAY_MS;
+    const bucketMs = rangeMs > SIX_MONTHS_MS
+      ? DAY_MS
+      : rangeMs > THREE_MONTHS_MS
+      ? 60 * 60 * 1000
+      : 60 * 1000;
+    const estimatedPoints = Math.ceil(rangeMs / bucketMs);
+    const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
 
     const historyRef = collection(
       doc(db, "crypto_prices", selectedCoin),
@@ -158,9 +166,9 @@ export default function MarketDetailsPage() {
     );
     const historyQuery = query(
       historyRef,
-      orderBy("time", "desc"),
+      orderBy("time", "asc"),
       where("time", ">=", startIso),
-      limit(2000)
+      limit(fetchLimit)
     );
 
     const unsubscribe = onSnapshot(
@@ -168,9 +176,7 @@ export default function MarketDetailsPage() {
       (snapshot) => {
         if (cancelled) return;
         const recordsMap = new Map();
-        snapshot
-          .docs
-          .forEach((docSnap) => {
+        snapshot.docs.forEach((docSnap) => {
             const data = docSnap.data();
             if (
               typeof data?.close === "number" &&
@@ -182,9 +188,7 @@ export default function MarketDetailsPage() {
               });
             }
           });
-        const sorted = Array.from(recordsMap.values())
-          .sort((a, b) => a.date.getTime() - b.date.getTime());
-        setHistory(sorted);
+        setHistory(Array.from(recordsMap.values()));
         setLoading(false);
       },
       (err) => {
