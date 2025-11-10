@@ -110,12 +110,14 @@ async function importCoin(
 
   console.log(`⏬ Scarico storico per ${coin.symbol} da Yahoo Finance...`);
 
-  const chart = await yahooFinance.chart(coin.ticker, {
+  const chart = (await yahooFinance.chart(coin.ticker, {
     interval: "1d",
     range: "max",
-  });
+  })) as any;
 
-  const result = chart?.result?.[0];
+  const result = Array.isArray(chart)
+    ? chart[0]
+    : (chart?.result?.[0] as any | undefined);
   if (!result || !result.timestamp || !result.indicators?.quote?.[0]?.close) {
     throw new Error(`Dati non disponibili per ${coin.ticker}`);
   }
@@ -123,18 +125,11 @@ async function importCoin(
   const closes = result.indicators.quote[0].close;
   const records: HistoryRecord[] = [];
 
-  result.timestamp.forEach((ts, idx) => {
+  result.timestamp.forEach((ts: number, idx: number) => {
     const close = closes[idx];
-    if (typeof close !== "number" || Number.isNaN(close)) {
-      return;
-    }
+    if (typeof close !== "number" || Number.isNaN(close)) return;
     const iso = new Date(ts * 1000).toISOString();
-    records.push({
-      time: iso,
-      close,
-      source: "yahoo",
-      symbol: coin.symbol,
-    });
+    records.push({ time: iso, close, source: "yahoo", symbol: coin.symbol });
   });
 
   if (records.length === 0) {
