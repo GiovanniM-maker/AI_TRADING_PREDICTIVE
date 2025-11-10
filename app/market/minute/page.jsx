@@ -150,7 +150,7 @@ export default function MarketMinutePage() {
     );
     const historyQuery = query(
       historyRef,
-      orderBy("time", "asc"),
+      orderBy("time", "desc"),
       where("time", ">=", startIso),
       limit(fetchLimit)
     );
@@ -169,7 +169,8 @@ export default function MarketMinutePage() {
           .map((item) => ({
             ...item,
             date: new Date(item.time),
-          }));
+          }))
+          .sort((a, b) => a.date.getTime() - b.date.getTime());
 
         setHistory(points);
         setLoading(false);

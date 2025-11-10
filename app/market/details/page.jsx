@@ -166,7 +166,7 @@ export default function MarketDetailsPage() {
     );
     const historyQuery = query(
       historyRef,
-      orderBy("time", "asc"),
+      orderBy("time", "desc"),
       where("time", ">=", startIso),
       limit(fetchLimit)
     );
@@ -188,7 +188,9 @@ export default function MarketDetailsPage() {
               });
             }
           });
-        setHistory(Array.from(recordsMap.values()));
+        const ordered = Array.from(recordsMap.values())
+          .sort((a, b) => a.date.getTime() - b.date.getTime());
+        setHistory(ordered);
         setLoading(false);
       },
       (err) => {
