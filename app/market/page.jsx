@@ -7,6 +7,7 @@ import {
   getDocs,
   getFirestore,
   limit,
+  query,
   onSnapshot,
   orderBy,
 } from "firebase/firestore";
@@ -52,26 +53,36 @@ export default function MarketPage() {
     COINS.forEach((coin) => {
       const coinDocRef = doc(db, "crypto_prices", coin.id);
       const historyRef = collection(coinDocRef, "history_yahoo");
-      const historyQuery = orderBy("time", "desc");
-
-      const unsubscribeHistory = onSnapshot(
-        collection(coinDocRef, "history_yahoo"),
-        (snapshot) => {
-          const historyData = [];
-          snapshot.forEach((doc) => {
-            historyData.push(doc.data());
-          });
-          historyData.sort((a, b) => new Date(a.time) - new Date(b.time));
-          setCoins((prev) => ({
-            ...prev,
-            [coin.id]: {
-              ...prev[coin.id],
-              history: historyData.slice(-10),
-            },
-          }));
-          setLoading(false);
-        }
+      const historyQuery = query(
+        historyRef,
+        orderBy("time", "desc"),
+        limit(10)
       );
+
+      const unsubscribeHistory = onSnapshot(historyQuery, (snapshot) => {
+        const historyData = snapshot.docs
+          .map((docSnap) => docSnap.data())
+          .filter(
+            (item) =>
+              typeof item?.close === "number" &&
+              typeof item?.time === "string"
+          )
+          .map((item) => ({
+            ...item,
+            time: item.time,
+          }));
+
+        historyData.reverse(); // ensure ascending order for chart
+
+        setCoins((prev) => ({
+          ...prev,
+          [coin.id]: {
+            ...prev[coin.id],
+            history: historyData,
+          },
+        }));
+        setLoading(false);
+      });
 
       const unsubscribeCoin = onSnapshot(coinDocRef, (docSnapshot) => {
         const data = docSnapshot.data();
@@ -89,19 +100,27 @@ export default function MarketPage() {
     });
 
     const interval = setInterval(() => {
-      // refresh data
       COINS.forEach(async (coin) => {
-        const historyQuery = orderBy("time", "desc");
-        const historySnapshot = await getDocs(
+        const historyQuery = query(
           collection(doc(db, "crypto_prices", coin.id), "history_yahoo"),
-          historyQuery,
+          orderBy("time", "desc"),
           limit(10)
         );
-        const historyData = [];
-        historySnapshot.forEach((doc) => {
-          historyData.push(doc.data());
-        });
-        historyData.sort((a, b) => new Date(a.time) - new Date(b.time));
+        const snapshot = await getDocs(historyQuery);
+        const historyData = snapshot.docs
+          .map((docSnap) => docSnap.data())
+          .filter(
+            (item) =>
+              typeof item?.close === "number" &&
+              typeof item?.time === "string"
+          )
+          .map((item) => ({
+            ...item,
+            time: item.time,
+          }));
+
+        historyData.reverse();
+
         setCoins((prev) => ({
           ...prev,
           [coin.id]: {
@@ -122,7 +141,13 @@ export default function MarketPage() {
     if (!history || history.length < 2) return null;
     const latest = history[history.length - 1]?.close;
     const previous = history[history.length - 2]?.close;
-    if (!latest || !previous) return null;
+    if (
+      typeof latest !== "number" ||
+      typeof previous !== "number" ||
+      previous === 0
+    ) {
+      return null;
+    }
     return ((latest - previous) / previous) * 100;
   };
 
@@ -141,6 +166,13 @@ export default function MarketPage() {
               const history = data?.history || [];
               const price = data?.price || null;
               const variation = getVariation(history);
+              const chartData = history.map((point) => ({
+                ...point,
+                label: new Date(point.time).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+              }));
 
               return (
                 <div
@@ -161,20 +193,24 @@ export default function MarketPage() {
                     )}
                   </div>
                   <p className="text-2xl font-bold mb-4">
-                    {price ? `$${Number(price).toLocaleString()}` : "No market data"}
+                    {typeof price === "number"
+                      ? `$${price.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                        })}`
+                      : "No market data"}
                   </p>
                   {history.length > 0 ? (
                     <div className="h-32">
                       <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={history}>
+                        <LineChart data={chartData}>
                           <Tooltip
                             contentStyle={{
                               backgroundColor: "#1f2937",
                               border: "none",
                               borderRadius: "0.5rem",
                             }}
-                            labelFormatter={(label) =>
-                              new Date(label).toLocaleString()
+                            labelFormatter={(_, index) =>
+                              chartData[index]?.label ?? ""
                             }
                           />
                           <Line
