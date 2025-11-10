@@ -225,8 +225,10 @@ export default function MarketMinutePage() {
           .map((item) => ({
             ...item,
             date: new Date(item.time),
+            originalDate: new Date(item.time),
           }))
-          .sort((a, b) => a.date.getTime() - b.date.getTime());
+          .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
+          .map(({ originalDate, ...rest }) => rest);
 
         setHistory(points);
         setLoading(false);

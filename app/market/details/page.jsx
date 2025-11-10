@@ -234,11 +234,13 @@ export default function MarketDetailsPage() {
               recordsMap.set(data.time, {
                 ...data,
                 date: new Date(data.time),
+                originalDate: new Date(data.time),
               });
             }
           });
         const ordered = Array.from(recordsMap.values())
-          .sort((a, b) => a.date.getTime() - b.date.getTime());
+          .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
+          .map(({ originalDate, ...rest }) => rest);
         setHistory(ordered);
         setLoading(false);
       },
