@@ -206,8 +206,8 @@ export default function MarketMinutePage() {
     );
     const historyQuery = query(
       historyRef,
-      orderBy("time", "desc"),
       where("time", ">=", startIso),
+      orderBy("time", "asc"),
       limit(fetchLimit)
     );
 
@@ -217,20 +217,34 @@ export default function MarketMinutePage() {
         if (cancelled) return;
         const points = snapshot.docs
           .map((docSnap) => docSnap.data())
-          .filter(
-            (item) =>
-              typeof item?.close === "number" &&
+          .filter((item) => typeof item?.time !== "undefined")
+          .map((item) => {
+            const price =
+              typeof item?.close_usd === "number"
+                ? item.close_usd
+                : typeof item?.close === "number"
+                ? item.close
+                : null;
+            const iso =
               typeof item?.time === "string"
-          )
-          .map((item) => ({
-            ...item,
-            date: new Date(item.time),
-            originalDate: new Date(item.time),
-          }))
+                ? item.time
+                : item?.time?.toDate?.()?.toISOString?.() ?? null;
+            if (price === null || !iso) return null;
+            const pointDate = new Date(iso);
+            return {
+              close: price,
+              time: iso,
+              date: truncateDate(pointDate, bucketType),
+              originalDate: pointDate,
+            };
+          })
+          .filter((item) => item !== null);
+
+        const ordered = points
           .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
           .map(({ originalDate, ...rest }) => rest);
 
-        setHistory([...points]);
+        setHistory([...ordered]);
         setLoading(false);
       },
       (err) => {

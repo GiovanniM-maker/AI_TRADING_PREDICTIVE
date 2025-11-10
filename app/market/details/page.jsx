@@ -215,8 +215,8 @@ export default function MarketDetailsPage() {
     );
     const historyQuery = query(
       historyRef,
-      orderBy("time", "desc"),
       where("time", ">=", startIso),
+      orderBy("time", "asc"),
       limit(fetchLimit)
     );
 
@@ -226,18 +226,26 @@ export default function MarketDetailsPage() {
         if (cancelled) return;
         const recordsMap = new Map();
         snapshot.docs.forEach((docSnap) => {
-            const data = docSnap.data();
-            if (
-              typeof data?.close === "number" &&
-              typeof data?.time === "string"
-            ) {
-              recordsMap.set(data.time, {
-                ...data,
-                date: new Date(data.time),
-                originalDate: new Date(data.time),
-              });
-            }
+          const data = docSnap.data();
+          const price =
+            typeof data?.close_usd === "number"
+              ? data.close_usd
+              : typeof data?.close === "number"
+              ? data.close
+              : null;
+          const iso =
+            typeof data?.time === "string"
+              ? data.time
+              : data?.time?.toDate?.()?.toISOString?.() ?? null;
+          if (price === null || !iso) return;
+          const pointDate = new Date(iso);
+          recordsMap.set(iso, {
+            close: price,
+            time: iso,
+            date: truncateDate(pointDate, bucketType),
+            originalDate: pointDate,
           });
+        });
         const ordered = Array.from(recordsMap.values())
           .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
           .map(({ originalDate, ...rest }) => rest);
@@ -429,7 +437,10 @@ export default function MarketDetailsPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart
                     data={chartData}
-                    key={chartData[chartData.length - 1]?.time || "chart"}
+                    key={
+                      chartData[chartData.length - 1]?.time ||
+                      `chart-${selectedCoin}-${selectedRange}`
+                    }
                   >
                     <XAxis
                       dataKey="time"
