@@ -228,6 +228,16 @@ export default function MarketDetailsPage() {
     [aggregatedHistory, isDailyAggregation]
   );
 
+  const yDomain = useMemo(() => {
+    if (aggregatedHistory.length === 0) return null;
+    const values = aggregatedHistory.map((point) => point.close);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    const padding = (max - min) * 0.05 || Math.abs(min) * 0.01 || 1;
+    return [min - padding, max + padding];
+  }, [aggregatedHistory]);
+
   const change = useMemo(() => {
     if (
       aggregatedHistory.length === 0 ||
@@ -361,6 +371,7 @@ export default function MarketDetailsPage() {
                           maximumFractionDigits: 2,
                         })
                       }
+                      domain={yDomain ?? ["auto", "auto"]}
                     />
                     <Tooltip
                       contentStyle={{
