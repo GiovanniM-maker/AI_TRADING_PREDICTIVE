@@ -286,31 +286,25 @@ export default function MarketDetailsPage() {
     () =>
       aggregatedHistory.map((item) => ({
         time: item.date.toISOString(),
-        label: (() => {
-          const baseDate = new Date(item.date.getTime() - 60 * 60 * 1000);
-          if (isDailyAggregation) {
-            return baseDate.toLocaleDateString();
-          }
-          if (isHourlyAggregation) {
-            return baseDate.toLocaleString([], {
+        label: isDailyAggregation
+          ? item.date.toLocaleDateString()
+          : isHourlyAggregation
+          ? item.date.toLocaleString([], {
               year: "numeric",
               month: "2-digit",
               day: "2-digit",
               hour: "2-digit",
-            });
-          }
-          if (isMinuteAggregation) {
-            return baseDate.toLocaleString([], {
+            })
+          : isMinuteAggregation
+          ? item.date.toLocaleString([], {
               hour: "2-digit",
               minute: "2-digit",
-            });
-          }
-          return baseDate.toLocaleString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          });
-        })(),
+            })
+          : item.date.toLocaleString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            }),
         close: item.close,
       })),
     [aggregatedHistory, isDailyAggregation, isHourlyAggregation, isMinuteAggregation]
@@ -454,32 +448,24 @@ export default function MarketDetailsPage() {
                     <XAxis
                       dataKey="time"
                       tickFormatter={(value) =>
-                        (() => {
-                          const baseDate = new Date(
-                            new Date(value).getTime() - 60 * 60 * 1000
-                          );
-                          if (isDailyAggregation) {
-                            return baseDate.toLocaleDateString();
-                          }
-                          if (isHourlyAggregation) {
-                            return baseDate.toLocaleString([], {
+                        isDailyAggregation
+                          ? new Date(value).toLocaleDateString()
+                          : isHourlyAggregation
+                          ? new Date(value).toLocaleString([], {
                               month: "2-digit",
                               day: "2-digit",
                               hour: "2-digit",
-                            });
-                          }
-                          if (isMinuteAggregation) {
-                            return baseDate.toLocaleTimeString([], {
+                            })
+                          : isMinuteAggregation
+                          ? new Date(value).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
-                            });
-                          }
-                          return baseDate.toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          });
-                        })()
+                            })
+                          : new Date(value).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                            })
                       }
                       stroke="#6B7280"
                     />
@@ -501,9 +487,7 @@ export default function MarketDetailsPage() {
                       }}
                       formatter={(value) => formatCurrency(value)}
                       labelFormatter={(label) =>
-                        new Date(
-                          new Date(label).getTime() - 60 * 60 * 1000
-                        ).toLocaleString()
+                        new Date(label).toLocaleString()
                       }
                     />
                     <Line
