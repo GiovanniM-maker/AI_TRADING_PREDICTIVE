@@ -189,12 +189,14 @@ export default function MarketDetailsPage() {
     setLoading(true);
     setError(null);
 
+    const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
     const now = new Date();
-    const start = new Date(now.getTime() - (rangeConfig?.ms ?? 0));
+    const start = new Date(now.getTime() - (range?.ms ?? 0));
     const startIso = start.toISOString();
-    const rangeMs = rangeConfig?.ms ?? DAY_MS;
+    const rangeMs = range?.ms ?? DAY_MS;
+
     const bucketMs = (() => {
-      switch (bucketType) {
+      switch (getBucketType(selectedRange)) {
         case "tenSeconds":
           return 10 * 1000;
         case "minute":
@@ -206,6 +208,7 @@ export default function MarketDetailsPage() {
           return DAY_MS;
       }
     })();
+
     const estimatedPoints = Math.ceil(rangeMs / bucketMs);
     const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
 
@@ -227,7 +230,12 @@ export default function MarketDetailsPage() {
         const recordsMap = new Map();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          const price = typeof data?.close === "number" ? data.close : null;
+          const price =
+            typeof data?.close === "number"
+              ? data.close
+              : typeof data?.close_usd === "number"
+              ? data.close_usd
+              : null;
           const iso =
             typeof data?.time === "string"
               ? data.time
@@ -237,7 +245,7 @@ export default function MarketDetailsPage() {
           recordsMap.set(iso, {
             close: price,
             time: iso,
-            date: truncateDate(pointDate, bucketType),
+            date: truncateDate(pointDate, getBucketType(selectedRange)),
             originalDate: pointDate,
           });
         });

@@ -186,7 +186,7 @@ export default function MarketMinutePage() {
     const startIso = start.toISOString();
     const rangeMs = range?.ms ?? DAY_MS;
     const bucketMs = (() => {
-      switch (bucketType) {
+      switch (getBucketType(selectedRange)) {
         case "tenSeconds":
           return 10 * 1000;
         case "minute":
@@ -201,8 +201,8 @@ export default function MarketMinutePage() {
     const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
 
     const historyRef = collection(
-      doc(db, "crypto_prices_minute", selectedCoin),
-      "history_minute"
+      doc(db, "crypto_prices", selectedCoin),
+      "history_yahoo"
     );
     const historyQuery = query(
       historyRef,
@@ -219,7 +219,12 @@ export default function MarketMinutePage() {
           .map((docSnap) => docSnap.data())
           .filter((item) => typeof item?.time !== "undefined")
           .map((item) => {
-            const price = typeof item?.close === "number" ? item.close : null;
+            const price =
+              typeof item?.close === "number"
+                ? item.close
+                : typeof item?.close_usd === "number"
+                ? item.close_usd
+                : null;
             const iso =
               typeof item?.time === "string"
                 ? item.time
@@ -229,7 +234,7 @@ export default function MarketMinutePage() {
             return {
               close: price,
               time: iso,
-              date: truncateDate(pointDate, bucketType),
+              date: truncateDate(pointDate, getBucketType(selectedRange)),
               originalDate: pointDate,
             };
           })
