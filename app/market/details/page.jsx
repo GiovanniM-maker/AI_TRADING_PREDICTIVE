@@ -47,6 +47,8 @@ const RANGE_OPTIONS = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const THREE_MONTHS_MS = 90 * DAY_MS;
+const SIX_MONTHS_MS = 180 * DAY_MS;
 
 function formatCurrency(value) {
   if (typeof value !== "number") return "-";
@@ -71,7 +73,8 @@ function calcChange(current, reference) {
 
 function aggregateForRange(points, rangeMs) {
   if (!Array.isArray(points) || points.length === 0) return [];
-  const groupByDay = rangeMs > DAY_MS;
+  const groupByDay = rangeMs > SIX_MONTHS_MS;
+  const groupByHour = rangeMs > THREE_MONTHS_MS && rangeMs <= SIX_MONTHS_MS;
   const map = new Map();
 
   points.forEach((point) => {
@@ -80,7 +83,9 @@ function aggregateForRange(points, rangeMs) {
     const iso = date.toISOString();
     const key = groupByDay
       ? iso.slice(0, 10) // YYYY-MM-DD
-      : iso; // keep minute-level precision
+      : groupByHour
+      ? iso.slice(0, 13) // YYYY-MM-DDTHH
+      : iso; // minute precision
     const existing = map.get(key);
     if (!existing || date.getTime() > existing.date.getTime()) {
       map.set(key, point);
@@ -211,7 +216,9 @@ export default function MarketDetailsPage() {
     () => aggregateForRange(history, rangeMs),
     [history, rangeMs]
   );
-  const isDailyAggregation = rangeMs > DAY_MS;
+  const isDailyAggregation = rangeMs > SIX_MONTHS_MS;
+  const isHourlyAggregation =
+    rangeMs > THREE_MONTHS_MS && rangeMs <= SIX_MONTHS_MS;
 
   const chartData = useMemo(
     () =>
@@ -219,13 +226,21 @@ export default function MarketDetailsPage() {
         time: item.date.toISOString(),
         label: isDailyAggregation
           ? item.date.toLocaleDateString()
+          : isHourlyAggregation
+          ? item.date.toLocaleString([], {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+            })
           : item.date.toLocaleString([], {
               hour: "2-digit",
               minute: "2-digit",
+              second: "2-digit",
             }),
         close: item.close,
       })),
-    [aggregatedHistory, isDailyAggregation]
+    [aggregatedHistory, isDailyAggregation, isHourlyAggregation]
   );
 
   const yDomain = useMemo(() => {
@@ -362,9 +377,16 @@ export default function MarketDetailsPage() {
                       tickFormatter={(value) =>
                         isDailyAggregation
                           ? new Date(value).toLocaleDateString()
+                          : isHourlyAggregation
+                          ? new Date(value).toLocaleString([], {
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                            })
                           : new Date(value).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",
+                              second: "2-digit",
                             })
                       }
                       stroke="#6B7280"
