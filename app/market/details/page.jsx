@@ -5,12 +5,11 @@ import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
+  limit,
+  onSnapshot,
   orderBy,
   query,
   where,
-  limit,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import {
@@ -93,23 +92,20 @@ export default function MarketDetailsPage() {
 
     let cancelled = false;
 
-    async function fetchCoinData() {
-      try {
-        const coinDocRef = doc(db, "crypto_prices", selectedCoin);
-        const coinDoc = await getDoc(coinDocRef);
+    const coinDocRef = doc(db, "crypto_prices", selectedCoin);
+    const unsubscribe = onSnapshot(
+      coinDocRef,
+      (snapshot) => {
         if (!cancelled) {
-          setCurrentPrice(coinDoc.data()?.lastYahooClose ?? null);
+          setCurrentPrice(snapshot.data()?.lastYahooClose ?? null);
         }
-      } catch (err) {
-        console.error(err);
-      }
-    }
+      },
+      (err) => console.error(err)
+    );
 
-    fetchCoinData();
-    const interval = setInterval(fetchCoinData, 15000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      unsubscribe();
     };
   }, [user, selectedCoin]);
 
@@ -117,39 +113,52 @@ export default function MarketDetailsPage() {
     if (!user) return;
     let cancelled = false;
 
-    async function fetchHistory() {
-      setLoading(true);
-      setError(null);
-      try {
-        const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
-        const now = new Date();
-        const start = new Date(now.getTime() - (range?.ms ?? 0));
-        const startIso = start.toISOString();
+    setHistory([]);
+    setLoading(true);
+    setError(null);
 
-        const historyQuery = query(
-        collection(doc(db, "crypto_prices", selectedCoin), "history_yahoo"),
-          where("time", ">=", startIso),
-          orderBy("time", "asc"),
-          limit(2000)
-        );
+    const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
+    const now = new Date();
+    const start = new Date(now.getTime() - (range?.ms ?? 0));
+    const startIso = start.toISOString();
 
-        const snapshot = await getDocs(historyQuery);
+    const historyRef = collection(
+      doc(db, "crypto_prices", selectedCoin),
+      "history_yahoo"
+    );
+    const historyQuery = query(
+      historyRef,
+      orderBy("time", "asc"),
+      where("time", ">=", startIso),
+      limit(2000)
+    );
+
+    const unsubscribe = onSnapshot(
+      historyQuery,
+      (snapshot) => {
         if (cancelled) return;
-
-        const items = snapshot.docs
-          .map((docSnap) => docSnap.data())
-          .filter(
-            (item) =>
-              typeof item?.close === "number" &&
-              typeof item?.time === "string"
-          )
-          .map((item) => ({
-            ...item,
-            date: new Date(item.time),
-          }));
-
-        setHistory(items);
-      } catch (err) {
+        const recordsMap = new Map();
+        snapshot
+          .docs
+          .forEach((docSnap) => {
+            const data = docSnap.data();
+            if (
+              typeof data?.close === "number" &&
+              typeof data?.time === "string"
+            ) {
+              recordsMap.set(data.time, {
+                ...data,
+                date: new Date(data.time),
+              });
+            }
+          });
+        const sorted = Array.from(recordsMap.values()).sort(
+          (a, b) => a.date.getTime() - b.date.getTime()
+        );
+        setHistory(sorted);
+        setLoading(false);
+      },
+      (err) => {
         console.error(err);
         if (!cancelled) {
           setError(
@@ -157,17 +166,14 @@ export default function MarketDetailsPage() {
               "Impossibile recuperare i dati di mercato per questo intervallo."
           );
           setHistory([]);
+          setLoading(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
-    }
+    );
 
-    fetchHistory();
-    const interval = setInterval(fetchHistory, 15000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      unsubscribe();
     };
   }, [user, selectedCoin, selectedRange]);
 
