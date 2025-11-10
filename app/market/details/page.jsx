@@ -227,12 +227,7 @@ export default function MarketDetailsPage() {
         const recordsMap = new Map();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          const price =
-            typeof data?.close_usd === "number"
-              ? data.close_usd
-              : typeof data?.close === "number"
-              ? data.close
-              : null;
+          const price = typeof data?.close === "number" ? data.close : null;
           const iso =
             typeof data?.time === "string"
               ? data.time

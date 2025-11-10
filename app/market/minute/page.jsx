@@ -219,12 +219,7 @@ export default function MarketMinutePage() {
           .map((docSnap) => docSnap.data())
           .filter((item) => typeof item?.time !== "undefined")
           .map((item) => {
-            const price =
-              typeof item?.close_usd === "number"
-                ? item.close_usd
-                : typeof item?.close === "number"
-                ? item.close
-                : null;
+            const price = typeof item?.close === "number" ? item.close : null;
             const iso =
               typeof item?.time === "string"
                 ? item.time
