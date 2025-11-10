@@ -46,6 +46,8 @@ const RANGE_OPTIONS = [
   { value: "5y", label: "Ultimi 5 anni", ms: 5 * 365 * 24 * 60 * 60 * 1000 },
 ];
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function formatCurrency(value) {
   if (typeof value !== "number") return "-";
   return `$${value.toLocaleString("en-US", {
@@ -65,6 +67,29 @@ function calcChange(current, reference) {
   const diff = current - reference;
   const pct = (diff / reference) * 100;
   return { diff, pct };
+}
+
+function aggregateForRange(points, rangeMs) {
+  if (!Array.isArray(points) || points.length === 0) return [];
+  const groupByDay = rangeMs > DAY_MS;
+  const map = new Map();
+
+  points.forEach((point) => {
+    const date = point?.date instanceof Date ? point.date : null;
+    if (!date) return;
+    const iso = date.toISOString();
+    const key = groupByDay
+      ? iso.slice(0, 10) // YYYY-MM-DD
+      : iso.slice(0, 13); // YYYY-MM-DDTHH
+    const existing = map.get(key);
+    if (!existing || date.getTime() > existing.date.getTime()) {
+      map.set(key, point);
+    }
+  });
+
+  return Array.from(map.values()).sort(
+    (a, b) => a.date.getTime() - b.date.getTime()
+  );
 }
 
 export default function MarketDetailsPage() {
@@ -177,21 +202,41 @@ export default function MarketDetailsPage() {
     };
   }, [user, selectedCoin, selectedRange]);
 
+  const rangeConfig = RANGE_OPTIONS.find(
+    (range) => range.value === selectedRange
+  );
+  const rangeMs = rangeConfig?.ms ?? 0;
+
+  const aggregatedHistory = useMemo(
+    () => aggregateForRange(history, rangeMs),
+    [history, rangeMs]
+  );
+  const isDailyAggregation = rangeMs > DAY_MS;
+
   const chartData = useMemo(
     () =>
-      history.map((item) => ({
+      aggregatedHistory.map((item) => ({
         time: item.date.toISOString(),
-        label: item.date.toLocaleString(),
+        label: isDailyAggregation
+          ? item.date.toLocaleDateString()
+          : item.date.toLocaleString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
         close: item.close,
       })),
-    [history]
+    [aggregatedHistory, isDailyAggregation]
   );
 
   const change = useMemo(() => {
-    if (history.length === 0 || typeof currentPrice !== "number") return null;
-    const reference = history[0]?.close;
+    if (
+      aggregatedHistory.length === 0 ||
+      typeof currentPrice !== "number"
+    )
+      return null;
+    const reference = aggregatedHistory[0]?.close;
     return calcChange(currentPrice, reference);
-  }, [history, currentPrice]);
+  }, [aggregatedHistory, currentPrice]);
 
   if (!user) return null;
 
@@ -271,7 +316,9 @@ export default function MarketDetailsPage() {
             <p className="text-gray-400 text-sm uppercase tracking-wide mb-2">
               Dati disponibili
             </p>
-            <p className="text-2xl font-semibold">{history.length}</p>
+            <p className="text-2xl font-semibold">
+              {aggregatedHistory.length}
+            </p>
             <p className="text-sm text-gray-400">
               punti nella finestra selezionata
             </p>
@@ -297,10 +344,12 @@ export default function MarketDetailsPage() {
                     <XAxis
                       dataKey="time"
                       tickFormatter={(value) =>
-                        new Date(value).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
+                        isDailyAggregation
+                          ? new Date(value).toLocaleDateString()
+                          : new Date(value).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
                       }
                       stroke="#6B7280"
                     />
