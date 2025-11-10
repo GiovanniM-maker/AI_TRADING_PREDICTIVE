@@ -241,7 +241,7 @@ export default function MarketDetailsPage() {
         const ordered = Array.from(recordsMap.values())
           .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
           .map(({ originalDate, ...rest }) => rest);
-        setHistory(ordered);
+        setHistory([...ordered]);
         setLoading(false);
       },
       (err) => {
@@ -425,9 +425,12 @@ export default function MarketDetailsPage() {
             ) : error ? (
               <p className="text-red-400 text-sm">{error}</p>
             ) : chartData.length > 0 ? (
-              <div className="h-[320px]">
+              <div className="h-80 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
+                  <LineChart
+                    data={chartData}
+                    key={chartData[chartData.length - 1]?.time || "chart"}
+                  >
                     <XAxis
                       dataKey="time"
                       tickFormatter={(value) =>

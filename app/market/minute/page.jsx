@@ -230,7 +230,7 @@ export default function MarketMinutePage() {
           .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
           .map(({ originalDate, ...rest }) => rest);
 
-        setHistory(points);
+        setHistory([...points]);
         setLoading(false);
       },
       (err) => {
@@ -416,7 +416,10 @@ export default function MarketMinutePage() {
             ) : chartData.length > 0 ? (
               <div className="h-[320px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
+                  <LineChart
+                    data={chartData}
+                    key={chartData[chartData.length - 1]?.time || "minute-chart"}
+                  >
                     <XAxis
                       dataKey="time"
                       stroke="#6B7280"
