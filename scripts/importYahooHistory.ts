@@ -1,5 +1,6 @@
 import { config } from "dotenv";
 import yahooFinance from "yahoo-finance2";
+const yf = new (yahooFinance as unknown as { new (): { chart: typeof yahooFinance.chart } })();
 import { cert, getApps, initializeApp, AppOptions } from "firebase-admin/app";
 import {
   Firestore,
@@ -120,37 +121,27 @@ async function importCoin(db: Firestore, coin: CoinConfig): Promise<CoinResult> 
       return result;
     }
 
-    const yahooData = (await yahooFinance.chart(coin.ticker, {
+    const yahooData = (await yf.chart(coin.ticker, {
       interval: "1d",
-      range: "max",
+      period1: new Date(0),
+      period2: new Date(),
     })) as any;
 
-    const chart = Array.isArray(yahooData)
-      ? yahooData[0]
-      : (yahooData?.result?.[0] as any | undefined);
+    const quotes: Array<{ date?: Date; close?: number | null }> =
+      yahooData?.quotes ?? [];
 
-    const timestamps: number[] | undefined = chart?.timestamp;
-    const closes: Array<number | null | undefined> | undefined =
-      chart?.indicators?.quote?.[0]?.close;
-
-    if (!timestamps || !closes) {
+    if (!Array.isArray(quotes) || quotes.length === 0) {
       throw new Error("Dati non disponibili");
     }
 
-    const records: HistoryRecord[] = [];
-    timestamps.forEach((ts: number, index: number) => {
-      const close = closes[index];
-      if (typeof close !== "number" || Number.isNaN(close)) {
-        return;
-      }
-      const time = new Date(ts * 1000).toISOString();
-      records.push({
-        time,
-        close,
-        source: "yahoo",
+    const records: HistoryRecord[] = quotes
+      .filter((quote) => quote?.date instanceof Date && typeof quote.close === "number")
+      .map((quote) => ({
+        time: (quote.date as Date).toISOString(),
+        close: quote.close as number,
+        source: "yahoo" as const,
         symbol: coin.symbol,
-      });
-    });
+      }));
 
     result.imported = records.length;
 
