@@ -44,6 +44,43 @@ const RANGE_OPTIONS = [
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function getBucketType(rangeValue) {
+  switch (rangeValue) {
+    case "1h":
+      return "tenSeconds";
+    case "15m":
+    case "30m":
+    case "3h":
+    case "6h":
+    case "12h":
+    case "24h":
+      return "minute";
+    case "3d":
+    case "7d":
+      return "hour";
+    default:
+      return "minute";
+  }
+}
+
+function truncateDate(date, bucketType) {
+  const bucketDate = new Date(date);
+  switch (bucketType) {
+    case "hour":
+      bucketDate.setUTCMinutes(0, 0, 0);
+      break;
+    case "minute":
+      bucketDate.setUTCSeconds(0, 0);
+      break;
+    case "tenSeconds":
+      const seconds = bucketDate.getUTCSeconds();
+      const floored = Math.floor(seconds / 10) * 10;
+      bucketDate.setUTCSeconds(floored, 0);
+      break;
+  }
+  return bucketDate;
+}
+
 function formatCurrency(value) {
   if (typeof value !== "number") return "-";
   return `$${value.toLocaleString("en-US", {
@@ -65,25 +102,28 @@ function calcChange(current, reference) {
   return { diff, pct };
 }
 
-function aggregateForRange(points, rangeMs) {
+function aggregateForRange(points, bucketType) {
   if (!Array.isArray(points) || points.length === 0) return [];
-  const groupByDay = rangeMs > DAY_MS;
   const map = new Map();
 
   points.forEach((point) => {
     const date = point?.date instanceof Date ? point.date : null;
     if (!date) return;
-    const iso = date.toISOString();
-    const key = groupByDay ? iso.slice(0, 10) : iso;
+    const bucketDate = truncateDate(date, bucketType);
+    const key = bucketDate.toISOString();
     const existing = map.get(key);
-    if (!existing || date.getTime() > existing.date.getTime()) {
-      map.set(key, point);
+    if (!existing || date.getTime() > existing.originalDate.getTime()) {
+      map.set(key, {
+        ...point,
+        date: bucketDate,
+        originalDate: date,
+      });
     }
   });
 
-  return Array.from(map.values()).sort(
-    (a, b) => a.date.getTime() - b.date.getTime()
-  );
+  return Array.from(map.values())
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .map(({ originalDate, ...rest }) => rest);
 }
 
 export default function MarketMinutePage() {
@@ -94,6 +134,11 @@ export default function MarketMinutePage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const rangeConfig = RANGE_OPTIONS.find(
+    (range) => range.value === selectedRange
+  );
+  const bucketType = getBucketType(rangeConfig?.value);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -140,7 +185,18 @@ export default function MarketMinutePage() {
     const start = new Date(now.getTime() - (range?.ms ?? 0));
     const startIso = start.toISOString();
     const rangeMs = range?.ms ?? DAY_MS;
-    const bucketMs = rangeMs > DAY_MS ? DAY_MS : 60 * 1000;
+    const bucketMs = (() => {
+      switch (bucketType) {
+        case "tenSeconds":
+          return 10 * 1000;
+        case "minute":
+          return 60 * 1000;
+        case "hour":
+          return 60 * 60 * 1000;
+        default:
+          return 60 * 1000;
+      }
+    })();
     const estimatedPoints = Math.ceil(rangeMs / bucketMs);
     const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
 
@@ -193,16 +249,13 @@ export default function MarketMinutePage() {
     };
   }, [user, selectedCoin, selectedRange]);
 
-  const rangeConfig = RANGE_OPTIONS.find(
-    (range) => range.value === selectedRange
-  );
-  const rangeMs = rangeConfig?.ms ?? 0;
-
   const aggregatedHistory = useMemo(
-    () => aggregateForRange(history, rangeMs),
-    [history, rangeMs]
+    () => aggregateForRange(history, bucketType),
+    [history, bucketType]
   );
-  const isDailyAggregation = rangeMs > DAY_MS;
+  const isDailyAggregation = bucketType === "day";
+  const isHourlyAggregation = bucketType === "hour";
+  const isMinuteAggregation = bucketType === "minute";
 
   const chartData = useMemo(
     () =>
@@ -210,6 +263,17 @@ export default function MarketMinutePage() {
         time: item.date.toISOString(),
         label: isDailyAggregation
           ? item.date.toLocaleDateString()
+          : isHourlyAggregation
+          ? item.date.toLocaleString([], {
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+            })
+          : isMinuteAggregation
+          ? item.date.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
           : item.date.toLocaleTimeString([], {
               hour: "2-digit",
               minute: "2-digit",
@@ -217,7 +281,7 @@ export default function MarketMinutePage() {
             }),
         close: item.close,
       })),
-    [aggregatedHistory, isDailyAggregation]
+    [aggregatedHistory, isDailyAggregation, isHourlyAggregation, isMinuteAggregation]
   );
 
   const yDomain = useMemo(() => {
@@ -357,6 +421,17 @@ export default function MarketMinutePage() {
                       tickFormatter={(value) =>
                         isDailyAggregation
                           ? new Date(value).toLocaleDateString()
+                          : isHourlyAggregation
+                          ? new Date(value).toLocaleString([], {
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                            })
+                          : isMinuteAggregation
+                          ? new Date(value).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
                           : new Date(value).toLocaleTimeString([], {
                               hour: "2-digit",
                               minute: "2-digit",

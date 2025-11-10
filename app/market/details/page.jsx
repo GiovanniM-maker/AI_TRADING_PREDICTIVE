@@ -50,6 +50,24 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const THREE_MONTHS_MS = 90 * DAY_MS;
 const SIX_MONTHS_MS = 180 * DAY_MS;
 
+function getBucketType(rangeValue) {
+  switch (rangeValue) {
+    case "1h":
+      return "tenSeconds";
+    case "3h":
+    case "6h":
+    case "12h":
+    case "24h":
+      return "minute";
+    case "3d":
+    case "7d":
+    case "1m":
+      return "hour";
+    default:
+      return "day";
+  }
+}
+
 function formatCurrency(value) {
   if (typeof value !== "number") return "-";
   return `$${value.toLocaleString("en-US", {
@@ -71,30 +89,49 @@ function calcChange(current, reference) {
   return { diff, pct };
 }
 
-function aggregateForRange(points, rangeMs) {
+function truncateDate(date, bucketType) {
+  const bucketDate = new Date(date);
+  switch (bucketType) {
+    case "day":
+      bucketDate.setUTCHours(0, 0, 0, 0);
+      break;
+    case "hour":
+      bucketDate.setUTCMinutes(0, 0, 0);
+      break;
+    case "minute":
+      bucketDate.setUTCSeconds(0, 0);
+      break;
+    case "tenSeconds":
+      const seconds = bucketDate.getUTCSeconds();
+      const floored = Math.floor(seconds / 10) * 10;
+      bucketDate.setUTCSeconds(floored, 0);
+      break;
+  }
+  return bucketDate;
+}
+
+function aggregateForRange(points, bucketType) {
   if (!Array.isArray(points) || points.length === 0) return [];
-  const groupByDay = rangeMs > SIX_MONTHS_MS;
-  const groupByHour = rangeMs > THREE_MONTHS_MS && rangeMs <= SIX_MONTHS_MS;
   const map = new Map();
 
   points.forEach((point) => {
     const date = point?.date instanceof Date ? point.date : null;
     if (!date) return;
-    const iso = date.toISOString();
-    const key = groupByDay
-      ? iso.slice(0, 10) // YYYY-MM-DD
-      : groupByHour
-      ? iso.slice(0, 13) // YYYY-MM-DDTHH
-      : iso; // minute precision
+    const bucketDate = truncateDate(date, bucketType);
+    const key = bucketDate.toISOString();
     const existing = map.get(key);
-    if (!existing || date.getTime() > existing.date.getTime()) {
-      map.set(key, point);
+    if (!existing || date.getTime() > existing.originalDate.getTime()) {
+      map.set(key, {
+        ...point,
+        date: bucketDate,
+        originalDate: date,
+      });
     }
   });
 
-  return Array.from(map.values()).sort(
-    (a, b) => a.date.getTime() - b.date.getTime()
-  );
+  return Array.from(map.values())
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .map(({ originalDate, ...rest }) => rest);
 }
 
 export default function MarketDetailsPage() {
@@ -105,6 +142,11 @@ export default function MarketDetailsPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const rangeConfig = RANGE_OPTIONS.find(
+    (range) => range.value === selectedRange
+  );
+  const bucketType = getBucketType(rangeConfig?.value);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (currentUser) => {
@@ -147,16 +189,23 @@ export default function MarketDetailsPage() {
     setLoading(true);
     setError(null);
 
-    const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
     const now = new Date();
-    const start = new Date(now.getTime() - (range?.ms ?? 0));
+    const start = new Date(now.getTime() - (rangeConfig?.ms ?? 0));
     const startIso = start.toISOString();
-    const rangeMs = range?.ms ?? DAY_MS;
-    const bucketMs = rangeMs > SIX_MONTHS_MS
-      ? DAY_MS
-      : rangeMs > THREE_MONTHS_MS
-      ? 60 * 60 * 1000
-      : 60 * 1000;
+    const rangeMs = rangeConfig?.ms ?? DAY_MS;
+    const bucketMs = (() => {
+      switch (bucketType) {
+        case "tenSeconds":
+          return 10 * 1000;
+        case "minute":
+          return 60 * 1000;
+        case "hour":
+          return 60 * 60 * 1000;
+        case "day":
+        default:
+          return DAY_MS;
+      }
+    })();
     const estimatedPoints = Math.ceil(rangeMs / bucketMs);
     const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
 
@@ -212,18 +261,13 @@ export default function MarketDetailsPage() {
     };
   }, [user, selectedCoin, selectedRange]);
 
-  const rangeConfig = RANGE_OPTIONS.find(
-    (range) => range.value === selectedRange
-  );
-  const rangeMs = rangeConfig?.ms ?? 0;
-
   const aggregatedHistory = useMemo(
-    () => aggregateForRange(history, rangeMs),
-    [history, rangeMs]
+    () => aggregateForRange(history, bucketType),
+    [history, bucketType]
   );
-  const isDailyAggregation = rangeMs > SIX_MONTHS_MS;
-  const isHourlyAggregation =
-    rangeMs > THREE_MONTHS_MS && rangeMs <= SIX_MONTHS_MS;
+  const isDailyAggregation = bucketType === "day";
+  const isHourlyAggregation = bucketType === "hour";
+  const isMinuteAggregation = bucketType === "minute";
 
   const chartData = useMemo(
     () =>
@@ -238,6 +282,11 @@ export default function MarketDetailsPage() {
               day: "2-digit",
               hour: "2-digit",
             })
+          : isMinuteAggregation
+          ? item.date.toLocaleString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
           : item.date.toLocaleString([], {
               hour: "2-digit",
               minute: "2-digit",
@@ -245,7 +294,7 @@ export default function MarketDetailsPage() {
             }),
         close: item.close,
       })),
-    [aggregatedHistory, isDailyAggregation, isHourlyAggregation]
+    [aggregatedHistory, isDailyAggregation, isHourlyAggregation, isMinuteAggregation]
   );
 
   const yDomain = useMemo(() => {
@@ -387,6 +436,11 @@ export default function MarketDetailsPage() {
                               month: "2-digit",
                               day: "2-digit",
                               hour: "2-digit",
+                            })
+                          : isMinuteAggregation
+                          ? new Date(value).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
                             })
                           : new Date(value).toLocaleTimeString([], {
                               hour: "2-digit",
