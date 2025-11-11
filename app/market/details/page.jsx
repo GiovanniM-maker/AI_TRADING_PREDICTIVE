@@ -22,6 +22,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
+import CryptoSentimentPanel from "@/components/CryptoSentimentPanel";
 
 const COIN_OPTIONS = [
   { value: "BTCUSDT", label: "Bitcoin (BTC)" },
@@ -737,138 +738,142 @@ export default function MarketDetailsPage() {
           </div>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl">
-          <div className="p-6 border-b border-gray-800">
-            <h2 className="text-xl font-semibold">Andamento storico</h2>
-            <p className="text-sm text-gray-400">
-              Ultimi valori registrati nella finestra temporale selezionata.
-            </p>
-            {pivotError && layerState.pivot && (
-              <p className="text-xs text-yellow-400 mt-2">{pivotError}</p>
-            )}
-            {indicatorError && indicatorEnabled && supportsIndicatorRange && (
-              <p className="text-xs text-red-400 mt-2">{indicatorError}</p>
-            )}
-            {indicatorLoading && indicatorEnabled && supportsIndicatorRange && (
-              <p className="text-xs text-gray-400 mt-2">
-                Caricamento indicatori tecnici…
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] items-stretch">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl h-full flex flex-col">
+            <div className="p-6 border-b border-gray-800">
+              <h2 className="text-xl font-semibold">Andamento storico</h2>
+              <p className="text-sm text-gray-400">
+                Ultimi valori registrati nella finestra temporale selezionata.
               </p>
-            )}
-          </div>
-          <div className="p-6">
-            {loading ? (
-              <p className="text-gray-400 text-sm">Caricamento dati...</p>
-            ) : error ? (
-              <p className="text-red-400 text-sm">{error}</p>
-            ) : chartDataWithIndicators.length > 0 ? (
-              <div className="h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={chartDataWithIndicators}
-                    key={
-                      chartDataWithIndicators[chartDataWithIndicators.length - 1]
-                        ?.time ||
-                      `chart-${selectedCoin}-${selectedRange}`
-                    }
-                  >
-                    <XAxis
-                      dataKey="time"
-                      tickFormatter={(value) =>
-                        isDailyAggregation
-                          ? new Date(value).toLocaleDateString()
-                          : isHourlyAggregation
-                          ? new Date(value).toLocaleString([], {
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                            })
-                          : isMinuteAggregation
-                          ? new Date(value).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })
-                          : new Date(value).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                              second: "2-digit",
-                            })
+              {pivotError && layerState.pivot && (
+                <p className="text-xs text-yellow-400 mt-2">{pivotError}</p>
+              )}
+              {indicatorError && indicatorEnabled && supportsIndicatorRange && (
+                <p className="text-xs text-red-400 mt-2">{indicatorError}</p>
+              )}
+              {indicatorLoading && indicatorEnabled && supportsIndicatorRange && (
+                <p className="text-xs text-gray-400 mt-2">
+                  Caricamento indicatori tecnici…
+                </p>
+              )}
+            </div>
+            <div className="p-6 flex-1">
+              {loading ? (
+                <p className="text-gray-400 text-sm">Caricamento dati...</p>
+              ) : error ? (
+                <p className="text-red-400 text-sm">{error}</p>
+              ) : chartDataWithIndicators.length > 0 ? (
+                <div className="h-80 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={chartDataWithIndicators}
+                      key={
+                        chartDataWithIndicators[chartDataWithIndicators.length - 1]
+                          ?.time ||
+                        `chart-${selectedCoin}-${selectedRange}`
                       }
-                      stroke="#6B7280"
-                    />
-                    <YAxis
-                      stroke="#6B7280"
-                      tickFormatter={(value) =>
-                        value.toLocaleString("en-US", {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 2,
-                        })
-                      }
-                      domain={yDomain ?? ["auto", "auto"]}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "#111827",
-                        border: "none",
-                        borderRadius: "0.75rem",
-                      }}
-                      formatter={(value) => formatCurrency(value)}
-                      labelFormatter={(label) =>
-                        new Date(label).toLocaleString()
-                      }
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="close"
-                      stroke="#38bdf8"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                    {layerState.ema20 && supportsIndicatorRange && (
+                    >
+                      <XAxis
+                        dataKey="time"
+                        tickFormatter={(value) =>
+                          isDailyAggregation
+                            ? new Date(value).toLocaleDateString()
+                            : isHourlyAggregation
+                            ? new Date(value).toLocaleString([], {
+                                month: "2-digit",
+                                day: "2-digit",
+                                hour: "2-digit",
+                              })
+                            : isMinuteAggregation
+                            ? new Date(value).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : new Date(value).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })
+                        }
+                        stroke="#6B7280"
+                      />
+                      <YAxis
+                        stroke="#6B7280"
+                        tickFormatter={(value) =>
+                          value.toLocaleString("en-US", {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 2,
+                          })
+                        }
+                        domain={yDomain ?? ["auto", "auto"]}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#111827",
+                          border: "none",
+                          borderRadius: "0.75rem",
+                        }}
+                        formatter={(value) => formatCurrency(value)}
+                        labelFormatter={(label) =>
+                          new Date(label).toLocaleString()
+                        }
+                      />
                       <Line
                         type="monotone"
-                        dataKey="ema20"
-                        stroke="#22d3ee"
-                        strokeWidth={1.5}
+                        dataKey="close"
+                        stroke="#38bdf8"
+                        strokeWidth={2}
                         dot={false}
-                        connectNulls
                       />
-                    )}
-                    {layerState.ema200 && supportsIndicatorRange && (
-                      <Line
-                        type="monotone"
-                        dataKey="ema200"
-                        stroke="#a855f7"
-                        strokeWidth={1.5}
-                        dot={false}
-                        connectNulls
-                      />
-                    )}
-                    {layerState.pivot &&
-                      !pivotLoading &&
-                      pivotLines.map((line) => (
-                        <ReferenceLine
-                          key={line.key}
-                          y={line.value}
-                          stroke={line.color}
-                          strokeDasharray="3 3"
-                          strokeWidth={1}
-                          label={{
-                            value: `${line.label} — ${formatCurrency(line.value)}`,
-                            position: "right",
-                            fill: line.color,
-                            fontSize: 12,
-                          }}
+                      {layerState.ema20 && supportsIndicatorRange && (
+                        <Line
+                          type="monotone"
+                          dataKey="ema20"
+                          stroke="#22d3ee"
+                          strokeWidth={1.5}
+                          dot={false}
+                          connectNulls
                         />
-                      ))}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <p className="text-gray-400 text-sm">
-                Nessun dato disponibile per questo intervallo temporale.
-              </p>
-            )}
+                      )}
+                      {layerState.ema200 && supportsIndicatorRange && (
+                        <Line
+                          type="monotone"
+                          dataKey="ema200"
+                          stroke="#a855f7"
+                          strokeWidth={1.5}
+                          dot={false}
+                          connectNulls
+                        />
+                      )}
+                      {layerState.pivot &&
+                        !pivotLoading &&
+                        pivotLines.map((line) => (
+                          <ReferenceLine
+                            key={line.key}
+                            y={line.value}
+                            stroke={line.color}
+                            strokeDasharray="3 3"
+                            strokeWidth={1}
+                            label={{
+                              value: `${line.label} — ${formatCurrency(line.value)}`,
+                              position: "right",
+                              fill: line.color,
+                              fontSize: 12,
+                            }}
+                          />
+                        ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="text-gray-400 text-sm">
+                  Nessun dato disponibile per questo intervallo temporale.
+                </p>
+              )}
+            </div>
           </div>
+
+          <CryptoSentimentPanel symbol={selectedCoin} />
         </div>
 
         {supportsIndicatorRange && indicatorEnabled && (
