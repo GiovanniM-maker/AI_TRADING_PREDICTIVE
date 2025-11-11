@@ -5,6 +5,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   doc,
+  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -19,6 +20,7 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 
 const COIN_OPTIONS = [
@@ -158,6 +160,10 @@ export default function MarketDetailsPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showPivotLines, setShowPivotLines] = useState(false);
+  const [pivotLevels, setPivotLevels] = useState(null);
+  const [pivotLoading, setPivotLoading] = useState(false);
+  const [pivotError, setPivotError] = useState(null);
 
   const rangeConfig = RANGE_OPTIONS.find(
     (range) => range.value === selectedRange
@@ -355,6 +361,76 @@ export default function MarketDetailsPage() {
     return calcChange(currentPrice, reference);
   }, [aggregatedHistory, currentPrice]);
 
+  useEffect(() => {
+    if (!user || !showPivotLines) {
+      setPivotLevels(null);
+      setPivotError(null);
+      setPivotLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const fetchPivot = async () => {
+      try {
+        setPivotLoading(true);
+        setPivotError(null);
+        const pivotsRef = collection(
+          db,
+          "crypto_prices",
+          selectedCoin,
+          "pivot_points"
+        );
+        const snapshot = await getDocs(
+          query(pivotsRef, orderBy("date", "desc"), limit(1))
+        );
+        if (!snapshot.empty) {
+          const data = snapshot.docs[0]?.data();
+          if (!cancelled) {
+            setPivotLevels(data ?? null);
+          }
+        } else if (!cancelled) {
+          setPivotLevels(null);
+          setPivotError("Nessun pivot disponibile");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPivotError(
+            err?.message ?? "Impossibile recuperare i pivot point attuali."
+          );
+          setPivotLevels(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setPivotLoading(false);
+        }
+      }
+    };
+
+    fetchPivot();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, showPivotLines, selectedCoin]);
+
+  const pivotLines = useMemo(() => {
+    if (!pivotLevels) return [];
+    const entries = [
+      { key: "r2", label: "R2", value: pivotLevels?.r2, color: "#fca5a5" },
+      { key: "r1", label: "R1", value: pivotLevels?.r1, color: "#f87171" },
+      {
+        key: "pivot",
+        label: "Pivot",
+        value: pivotLevels?.pivot,
+        color: "#facc15",
+      },
+      { key: "s1", label: "S1", value: pivotLevels?.s1, color: "#4ade80" },
+      { key: "s2", label: "S2", value: pivotLevels?.s2, color: "#bbf7d0" },
+    ];
+    return entries.filter(
+      (entry) => typeof entry.value === "number" && Number.isFinite(entry.value)
+    );
+  }, [pivotLevels]);
+
   if (!user) return null;
 
   return (
@@ -390,6 +466,24 @@ export default function MarketDetailsPage() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={() => setShowPivotLines((prev) => !prev)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm transition-colors ${
+                showPivotLines
+                  ? "bg-yellow-500/10 border-yellow-400 text-yellow-300"
+                  : "bg-gray-900 border-gray-700 text-gray-300"
+              }`}
+            >
+              <span>Pivot Points</span>
+              <span
+                className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                  showPivotLines ? "bg-yellow-400/20" : "bg-gray-800"
+                }`}
+              >
+                {showPivotLines ? "ON" : "OFF"}
+              </span>
+            </button>
           </div>
         </div>
 
@@ -448,6 +542,9 @@ export default function MarketDetailsPage() {
             <p className="text-sm text-gray-400">
               Ultimi valori registrati nella finestra temporale selezionata.
             </p>
+            {pivotError && showPivotLines && (
+              <p className="text-xs text-yellow-400 mt-2">{pivotError}</p>
+            )}
           </div>
           <div className="p-6">
             {loading ? (
@@ -516,6 +613,23 @@ export default function MarketDetailsPage() {
                       strokeWidth={2}
                       dot={false}
                     />
+                    {showPivotLines &&
+                      !pivotLoading &&
+                      pivotLines.map((line) => (
+                        <ReferenceLine
+                          key={line.key}
+                          y={line.value}
+                          stroke={line.color}
+                          strokeDasharray="3 3"
+                          strokeWidth={1}
+                          label={{
+                            value: `${line.label} — ${formatCurrency(line.value)}`,
+                            position: "right",
+                            fill: line.color,
+                            fontSize: 12,
+                          }}
+                        />
+                      ))}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
