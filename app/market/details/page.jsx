@@ -167,6 +167,9 @@ export default function MarketDetailsPage() {
     ema200: false,
     rsi: false,
     macd: false,
+    distEma20: false,
+    distEma200: false,
+    atr14: false,
   });
   const [pivotLevels, setPivotLevels] = useState(null);
   const [pivotLoading, setPivotLoading] = useState(false);
@@ -181,7 +184,13 @@ export default function MarketDetailsPage() {
   const bucketType = getBucketType(rangeConfig?.value);
   const supportsIndicatorRange = bucketType === "minute";
   const indicatorEnabled =
-    layerState.ema20 || layerState.ema200 || layerState.rsi || layerState.macd;
+    layerState.ema20 ||
+    layerState.ema200 ||
+    layerState.rsi ||
+    layerState.macd ||
+    layerState.distEma20 ||
+    layerState.distEma200 ||
+    layerState.atr14;
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -202,6 +211,9 @@ export default function MarketDetailsPage() {
         ema200: false,
         rsi: false,
         macd: false,
+        distEma20: false,
+        distEma200: false,
+        atr14: false,
       }));
     }
   }, [supportsIndicatorRange, indicatorEnabled]);
@@ -359,22 +371,6 @@ export default function MarketDetailsPage() {
       })),
     [aggregatedHistory, isDailyAggregation, isHourlyAggregation, isMinuteAggregation]
   );
-
-  const yDomain = useMemo(() => {
-    if (aggregatedHistory.length === 0) return null;
-    const values = aggregatedHistory
-      .map((point) => point.close)
-      .filter((value) => typeof value === "number" && Number.isFinite(value));
-    if (values.length === 0) return null;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-    if (min === max) {
-      const offset = Math.max(Math.abs(min) * 0.01, 1);
-      return [min - offset, max + offset];
-    }
-    return [min, max];
-  }, [aggregatedHistory]);
 
   const change = useMemo(() => {
     if (
@@ -553,10 +549,78 @@ export default function MarketDetailsPage() {
             indicator && typeof indicator.ema200 === "number"
               ? indicator.ema200
               : null,
+          dist_ema20:
+            indicator && typeof indicator.dist_ema20 === "number"
+              ? indicator.dist_ema20
+              : null,
+          dist_ema200:
+            indicator && typeof indicator.dist_ema200 === "number"
+              ? indicator.dist_ema200
+              : null,
+          atr14:
+            indicator && typeof indicator.atr14 === "number"
+              ? indicator.atr14
+              : null,
         };
       }),
     [chartData, indicatorByTime]
   );
+
+  const yDomain = useMemo(() => {
+    if (chartDataWithIndicators.length === 0) return null;
+    const values = [];
+    chartDataWithIndicators.forEach((point) => {
+      if (typeof point.close === "number" && Number.isFinite(point.close)) {
+        values.push(point.close);
+      }
+      if (supportsIndicatorRange) {
+        if (
+          layerState.ema20 &&
+          typeof point.ema20 === "number" &&
+          Number.isFinite(point.ema20)
+        ) {
+          values.push(point.ema20);
+        }
+        if (
+          layerState.ema200 &&
+          typeof point.ema200 === "number" &&
+          Number.isFinite(point.ema200)
+        ) {
+          values.push(point.ema200);
+        }
+        if (
+          layerState.distEma20 &&
+          typeof point.dist_ema20 === "number" &&
+          Number.isFinite(point.dist_ema20)
+        ) {
+          values.push(point.dist_ema20);
+        }
+        if (
+          layerState.distEma200 &&
+          typeof point.dist_ema200 === "number" &&
+          Number.isFinite(point.dist_ema200)
+        ) {
+          values.push(point.dist_ema200);
+        }
+        if (
+          layerState.atr14 &&
+          typeof point.atr14 === "number" &&
+          Number.isFinite(point.atr14)
+        ) {
+          values.push(point.atr14);
+        }
+      }
+    });
+    if (values.length === 0) return null;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    if (min === max) {
+      const offset = Math.max(Math.abs(min) * 0.01, 1);
+      return [min - offset, max + offset];
+    }
+    return [min, max];
+  }, [chartDataWithIndicators, layerState, supportsIndicatorRange]);
 
   const rsiChartData = useMemo(
     () =>
@@ -646,6 +710,9 @@ export default function MarketDetailsPage() {
               {[
                 { key: "ema20", label: "EMA 20", requiresMinute: true },
                 { key: "ema200", label: "EMA 200", requiresMinute: true },
+                { key: "distEma20", label: "DIST EMA 20", requiresMinute: true },
+                { key: "distEma200", label: "DIST EMA 200", requiresMinute: true },
+                { key: "atr14", label: "ATR 14", requiresMinute: true },
                 { key: "rsi", label: "RSI 14", requiresMinute: true },
                 { key: "macd", label: "MACD", requiresMinute: true },
                 { key: "pivot", label: "Pivot Points", requiresMinute: false },
@@ -683,7 +750,8 @@ export default function MarketDetailsPage() {
             </div>
             {!supportsIndicatorRange && (
               <p className="text-xs text-gray-500 text-right">
-                EMA, RSI e MACD sono disponibili per intervalli fino a 24 ore.
+                EMA, DIST EMA, ATR, RSI e MACD sono disponibili per intervalli fino a
+                24 ore.
               </p>
             )}
           </div>
@@ -840,6 +908,36 @@ export default function MarketDetailsPage() {
                           type="monotone"
                           dataKey="ema200"
                           stroke="#a855f7"
+                          strokeWidth={1.5}
+                          dot={false}
+                          connectNulls
+                        />
+                      )}
+                      {layerState.distEma20 && supportsIndicatorRange && (
+                        <Line
+                          type="monotone"
+                          dataKey="dist_ema20"
+                          stroke="#29B6F6"
+                          strokeWidth={1.5}
+                          dot={false}
+                          connectNulls
+                        />
+                      )}
+                      {layerState.distEma200 && supportsIndicatorRange && (
+                        <Line
+                          type="monotone"
+                          dataKey="dist_ema200"
+                          stroke="#AB47BC"
+                          strokeWidth={1.5}
+                          dot={false}
+                          connectNulls
+                        />
+                      )}
+                      {layerState.atr14 && supportsIndicatorRange && (
+                        <Line
+                          type="monotone"
+                          dataKey="atr14"
+                          stroke="#FF9800"
                           strokeWidth={1.5}
                           dot={false}
                           connectNulls
