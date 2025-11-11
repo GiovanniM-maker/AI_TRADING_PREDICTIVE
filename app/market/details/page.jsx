@@ -160,26 +160,39 @@ export default function MarketDetailsPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showPivotLines, setShowPivotLines] = useState(false);
+  const [layerState, setLayerState] = useState({
+    pivot: false,
+    ema20: false,
+    ema200: false,
+    rsi: false,
+    macd: false,
+  });
   const [pivotLevels, setPivotLevels] = useState(null);
   const [pivotLoading, setPivotLoading] = useState(false);
   const [pivotError, setPivotError] = useState(null);
+  const [indicatorData, setIndicatorData] = useState([]);
+  const [indicatorLoading, setIndicatorLoading] = useState(false);
+  const [indicatorError, setIndicatorError] = useState(null);
 
   const rangeConfig = RANGE_OPTIONS.find(
     (range) => range.value === selectedRange
   );
   const bucketType = getBucketType(rangeConfig?.value);
+  const supportsIndicatorRange = bucketType === "minute";
+  const indicatorEnabled =
+    layerState.ema20 || layerState.ema200 || layerState.rsi || layerState.macd;
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (currentUser) => {
-      if (!currentUser) {
-        window.location.href = "/login";
-      } else {
-        setUser(currentUser);
-      }
-    });
-    return () => unsub();
-  }, []);
+    if (!supportsIndicatorRange && indicatorEnabled) {
+      setLayerState((prev) => ({
+        ...prev,
+        ema20: false,
+        ema200: false,
+        rsi: false,
+        macd: false,
+      }));
+    }
+  }, [supportsIndicatorRange, indicatorEnabled]);
 
   useEffect(() => {
     if (!user) return;
@@ -361,8 +374,15 @@ export default function MarketDetailsPage() {
     return calcChange(currentPrice, reference);
   }, [aggregatedHistory, currentPrice]);
 
+  const toggleLayer = (key) => {
+    setLayerState((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
   useEffect(() => {
-    if (!user || !showPivotLines) {
+    if (!user || !layerState.pivot) {
       setPivotLevels(null);
       setPivotError(null);
       setPivotLoading(false);
@@ -410,7 +430,149 @@ export default function MarketDetailsPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, showPivotLines, selectedCoin]);
+  }, [user, layerState.pivot, selectedCoin]);
+
+  useEffect(() => {
+    if (!user || !indicatorEnabled || !supportsIndicatorRange) {
+      setIndicatorData([]);
+      setIndicatorError(null);
+      setIndicatorLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    setIndicatorLoading(true);
+    setIndicatorError(null);
+
+    const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
+    const now = new Date();
+    const start = new Date(now.getTime() - (range?.ms ?? 0));
+    const startIso = start.toISOString();
+    const rangeMs = range?.ms ?? DAY_MS;
+    const docInterval = getDocInterval(selectedRange);
+    const fetchLimit = Math.min(
+      Math.max(Math.ceil(rangeMs / docInterval) + 200, 1000),
+      60000
+    );
+
+    const indicatorsRef = collection(
+      doc(db, "crypto_prices", selectedCoin),
+      "indicatori"
+    );
+    const indicatorQuery = query(
+      indicatorsRef,
+      where("time", ">=", startIso),
+      orderBy("time", "asc"),
+      limit(fetchLimit)
+    );
+
+    const unsubscribe = onSnapshot(
+      indicatorQuery,
+      (snapshot) => {
+        if (cancelled) return;
+        const rows = snapshot.docs
+          .map((docSnap) => docSnap.data())
+          .map((item) => {
+            const iso =
+              typeof item?.time === "string"
+                ? item.time
+                : item?.time?.toDate?.()?.toISOString?.() ?? null;
+            if (!iso) return null;
+            const date = new Date(iso);
+            return {
+              ...item,
+              time: iso,
+              date,
+            };
+          })
+          .filter((item) => item !== null)
+          .sort((a, b) => a.date.getTime() - b.date.getTime());
+        setIndicatorData(rows);
+        setIndicatorLoading(false);
+      },
+      (err) => {
+        console.error(err);
+        if (!cancelled) {
+          setIndicatorError(
+            err?.message ?? "Impossibile recuperare gli indicatori tecnici."
+          );
+          setIndicatorData([]);
+          setIndicatorLoading(false);
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [
+    user,
+    selectedCoin,
+    selectedRange,
+    indicatorEnabled,
+    supportsIndicatorRange,
+  ]);
+
+  const indicatorByTime = useMemo(() => {
+    const map = new Map();
+    indicatorData.forEach((item) => {
+      const iso = item?.time
+        ? new Date(item.time).toISOString()
+        : item?.date?.toISOString?.();
+      if (!iso) return;
+      map.set(iso, item);
+    });
+    return map;
+  }, [indicatorData]);
+
+  const chartDataWithIndicators = useMemo(
+    () =>
+      chartData.map((point) => {
+        const indicator = indicatorByTime.get(point.time);
+        return {
+          ...point,
+          ema20:
+            indicator && typeof indicator.ema20 === "number"
+              ? indicator.ema20
+              : null,
+          ema200:
+            indicator && typeof indicator.ema200 === "number"
+              ? indicator.ema200
+              : null,
+        };
+      }),
+    [chartData, indicatorByTime]
+  );
+
+  const rsiChartData = useMemo(
+    () =>
+      indicatorData.map((item) => ({
+        time: new Date(item.time).toISOString(),
+        rsi14:
+          typeof item?.rsi14 === "number" && Number.isFinite(item.rsi14)
+            ? item.rsi14
+            : null,
+      })),
+    [indicatorData]
+  );
+
+  const macdChartData = useMemo(
+    () =>
+      indicatorData.map((item) => ({
+        time: new Date(item.time).toISOString(),
+        macd:
+          typeof item?.macd === "number" && Number.isFinite(item.macd)
+            ? item.macd
+            : null,
+        signal:
+          typeof item?.signal === "number" && Number.isFinite(item.signal)
+            ? item.signal
+            : null,
+      })),
+    [indicatorData]
+  );
 
   const pivotLines = useMemo(() => {
     if (!pivotLevels) return [];
@@ -443,47 +605,75 @@ export default function MarketDetailsPage() {
               Analizza i prezzi memorizzati in Firestore per ogni criptovaluta.
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <select
-              className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm"
-              value={selectedCoin}
-              onChange={(event) => setSelectedCoin(event.target.value)}
-            >
-              {COIN_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <select
-              className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm"
-              value={selectedRange}
-              onChange={(event) => setSelectedRange(event.target.value)}
-            >
-              {RANGE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => setShowPivotLines((prev) => !prev)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm transition-colors ${
-                showPivotLines
-                  ? "bg-yellow-500/10 border-yellow-400 text-yellow-300"
-                  : "bg-gray-900 border-gray-700 text-gray-300"
-              }`}
-            >
-              <span>Pivot Points</span>
-              <span
-                className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                  showPivotLines ? "bg-yellow-400/20" : "bg-gray-800"
-                }`}
+          <div className="flex flex-col gap-3 sm:items-end">
+            <div className="flex flex-col sm:flex-row gap-4">
+              <select
+                className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm"
+                value={selectedCoin}
+                onChange={(event) => setSelectedCoin(event.target.value)}
               >
-                {showPivotLines ? "ON" : "OFF"}
-              </span>
-            </button>
+                {COIN_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-sm"
+                value={selectedRange}
+                onChange={(event) => setSelectedRange(event.target.value)}
+              >
+                {RANGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-2 justify-end">
+              {[
+                { key: "ema20", label: "EMA 20", requiresMinute: true },
+                { key: "ema200", label: "EMA 200", requiresMinute: true },
+                { key: "rsi", label: "RSI 14", requiresMinute: true },
+                { key: "macd", label: "MACD", requiresMinute: true },
+                { key: "pivot", label: "Pivot Points", requiresMinute: false },
+              ].map((option) => {
+                const disabled =
+                  option.requiresMinute && !supportsIndicatorRange;
+                const active = layerState[option.key];
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => !disabled && toggleLayer(option.key)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs uppercase tracking-wide transition-colors ${
+                      active
+                        ? "border-cyan-400 bg-cyan-500/10 text-cyan-200"
+                        : "border-gray-700 bg-gray-900 text-gray-300"
+                    } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+                    title={
+                      disabled
+                        ? "Indicatori disponibili solo per intervalli fino a 24 ore"
+                        : undefined
+                    }
+                  >
+                    <span>{option.label}</span>
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        active ? "bg-cyan-400/20" : "bg-gray-800"
+                      }`}
+                    >
+                      {active ? "ON" : "OFF"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {!supportsIndicatorRange && (
+              <p className="text-xs text-gray-500 text-right">
+                EMA, RSI e MACD sono disponibili per intervalli fino a 24 ore.
+              </p>
+            )}
           </div>
         </div>
 
@@ -542,8 +732,16 @@ export default function MarketDetailsPage() {
             <p className="text-sm text-gray-400">
               Ultimi valori registrati nella finestra temporale selezionata.
             </p>
-            {pivotError && showPivotLines && (
+            {pivotError && layerState.pivot && (
               <p className="text-xs text-yellow-400 mt-2">{pivotError}</p>
+            )}
+            {indicatorError && indicatorEnabled && supportsIndicatorRange && (
+              <p className="text-xs text-red-400 mt-2">{indicatorError}</p>
+            )}
+            {indicatorLoading && indicatorEnabled && supportsIndicatorRange && (
+              <p className="text-xs text-gray-400 mt-2">
+                Caricamento indicatori tecnici…
+              </p>
             )}
           </div>
           <div className="p-6">
@@ -551,13 +749,14 @@ export default function MarketDetailsPage() {
               <p className="text-gray-400 text-sm">Caricamento dati...</p>
             ) : error ? (
               <p className="text-red-400 text-sm">{error}</p>
-            ) : chartData.length > 0 ? (
+            ) : chartDataWithIndicators.length > 0 ? (
               <div className="h-80 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart
-                    data={chartData}
+                    data={chartDataWithIndicators}
                     key={
-                      chartData[chartData.length - 1]?.time ||
+                      chartDataWithIndicators[chartDataWithIndicators.length - 1]
+                        ?.time ||
                       `chart-${selectedCoin}-${selectedRange}`
                     }
                   >
@@ -613,7 +812,27 @@ export default function MarketDetailsPage() {
                       strokeWidth={2}
                       dot={false}
                     />
-                    {showPivotLines &&
+                    {layerState.ema20 && supportsIndicatorRange && (
+                      <Line
+                        type="monotone"
+                        dataKey="ema20"
+                        stroke="#22d3ee"
+                        strokeWidth={1.5}
+                        dot={false}
+                        connectNulls
+                      />
+                    )}
+                    {layerState.ema200 && supportsIndicatorRange && (
+                      <Line
+                        type="monotone"
+                        dataKey="ema200"
+                        stroke="#a855f7"
+                        strokeWidth={1.5}
+                        dot={false}
+                        connectNulls
+                      />
+                    )}
+                    {layerState.pivot &&
                       !pivotLoading &&
                       pivotLines.map((line) => (
                         <ReferenceLine
@@ -640,6 +859,126 @@ export default function MarketDetailsPage() {
             )}
           </div>
         </div>
+
+        {supportsIndicatorRange && indicatorEnabled && (
+          <div className="mt-6 space-y-6">
+            {layerState.rsi && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl">
+                <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">RSI 14</h3>
+                  <span className="text-xs text-gray-400">0 – 100</span>
+                </div>
+                <div className="p-4">
+                  {indicatorLoading ? (
+                    <p className="text-gray-400 text-sm">
+                      Caricamento RSI...
+                    </p>
+                  ) : rsiChartData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={rsiChartData}>
+                          <XAxis
+                            dataKey="time"
+                            stroke="#6B7280"
+                            tickFormatter={(value) =>
+                              new Date(value).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            }
+                          />
+                          <YAxis domain={[0, 100]} stroke="#6B7280" />
+                          <ReferenceLine y={70} stroke="#f87171" strokeDasharray="3 3" />
+                          <ReferenceLine y={30} stroke="#34d399" strokeDasharray="3 3" />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#111827",
+                              border: "none",
+                              borderRadius: "0.75rem",
+                            }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="rsi14"
+                            stroke="#fde047"
+                            strokeWidth={1.5}
+                            dot={false}
+                            connectNulls
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-gray-400 text-sm">
+                      Nessun dato RSI disponibile per questo intervallo.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {layerState.macd && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl">
+                <div className="p-4 border-b border-gray-800">
+                  <h3 className="text-lg font-semibold">MACD</h3>
+                </div>
+                <div className="p-4">
+                  {indicatorLoading ? (
+                    <p className="text-gray-400 text-sm">
+                      Caricamento MACD...
+                    </p>
+                  ) : macdChartData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={macdChartData}>
+                          <XAxis
+                            dataKey="time"
+                            stroke="#6B7280"
+                            tickFormatter={(value) =>
+                              new Date(value).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            }
+                          />
+                          <YAxis stroke="#6B7280" domain={["auto", "auto"]} />
+                          <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="2 2" />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#111827",
+                              border: "none",
+                              borderRadius: "0.75rem",
+                            }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="macd"
+                            stroke="#60a5fa"
+                            strokeWidth={1.5}
+                            dot={false}
+                            connectNulls
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="signal"
+                            stroke="#fb7185"
+                            strokeWidth={1.5}
+                            dot={false}
+                            connectNulls
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-gray-400 text-sm">
+                      Nessun dato MACD disponibile per questo intervallo.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
