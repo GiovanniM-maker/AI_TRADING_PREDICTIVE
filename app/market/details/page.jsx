@@ -183,6 +183,17 @@ export default function MarketDetailsPage() {
     layerState.ema20 || layerState.ema200 || layerState.rsi || layerState.macd;
 
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!currentUser) {
+        window.location.href = "/login";
+      } else {
+        setUser(currentUser);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!supportsIndicatorRange && indicatorEnabled) {
       setLayerState((prev) => ({
         ...prev,
