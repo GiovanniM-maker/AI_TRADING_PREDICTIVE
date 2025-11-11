@@ -46,10 +46,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function getBucketType(rangeValue) {
   switch (rangeValue) {
-    case "1h":
-      return "tenSeconds";
     case "15m":
     case "30m":
+    case "1h":
     case "3h":
     case "6h":
     case "12h":
@@ -75,7 +74,7 @@ function getDocInterval(rangeValue) {
       return 60 * 1000;
     case "3d":
     case "7d":
-      return 60 * 1000;
+      return 60 * 60 * 1000;
     default:
       return 60 * 1000;
   }
@@ -205,8 +204,6 @@ export default function MarketMinutePage() {
     const rangeMs = range?.ms ?? DAY_MS;
     const bucketMs = (() => {
       switch (getBucketType(selectedRange)) {
-        case "tenSeconds":
-          return 10 * 1000;
         case "minute":
           return 60 * 1000;
         case "hour":

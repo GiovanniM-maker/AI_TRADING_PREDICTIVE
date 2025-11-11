@@ -53,7 +53,6 @@ const SIX_MONTHS_MS = 180 * DAY_MS;
 function getBucketType(rangeValue) {
   switch (rangeValue) {
     case "1h":
-      return "tenSeconds";
     case "3h":
     case "6h":
     case "12h":
@@ -71,17 +70,14 @@ function getBucketType(rangeValue) {
 function getDocInterval(rangeValue) {
   switch (rangeValue) {
     case "1h":
-      return 10 * 1000;
     case "3h":
     case "6h":
     case "12h":
     case "24h":
+      return 60 * 1000;
     case "3d":
     case "7d":
     case "1m":
-      return 60 * 1000;
-    case "3m":
-    case "6m":
       return 60 * 60 * 1000;
     default:
       return DAY_MS;
@@ -217,8 +213,6 @@ export default function MarketDetailsPage() {
 
     const bucketMs = (() => {
       switch (getBucketType(selectedRange)) {
-        case "tenSeconds":
-          return 10 * 1000;
         case "minute":
           return 60 * 1000;
         case "hour":
