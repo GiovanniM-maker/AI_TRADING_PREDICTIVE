@@ -567,50 +567,10 @@ export default function MarketDetailsPage() {
   );
 
   const yDomain = useMemo(() => {
-    if (chartDataWithIndicators.length === 0) return null;
-    const values = [];
-    chartDataWithIndicators.forEach((point) => {
-      if (typeof point.close === "number" && Number.isFinite(point.close)) {
-        values.push(point.close);
-      }
-      if (supportsIndicatorRange) {
-        if (
-          layerState.ema20 &&
-          typeof point.ema20 === "number" &&
-          Number.isFinite(point.ema20)
-        ) {
-          values.push(point.ema20);
-        }
-        if (
-          layerState.ema200 &&
-          typeof point.ema200 === "number" &&
-          Number.isFinite(point.ema200)
-        ) {
-          values.push(point.ema200);
-        }
-        if (
-          layerState.distEma20 &&
-          typeof point.dist_ema20 === "number" &&
-          Number.isFinite(point.dist_ema20)
-        ) {
-          values.push(point.dist_ema20);
-        }
-        if (
-          layerState.distEma200 &&
-          typeof point.dist_ema200 === "number" &&
-          Number.isFinite(point.dist_ema200)
-        ) {
-          values.push(point.dist_ema200);
-        }
-        if (
-          layerState.atr14 &&
-          typeof point.atr14 === "number" &&
-          Number.isFinite(point.atr14)
-        ) {
-          values.push(point.atr14);
-        }
-      }
-    });
+    if (aggregatedHistory.length === 0) return null;
+    const values = aggregatedHistory
+      .map((point) => point.close)
+      .filter((value) => typeof value === "number" && Number.isFinite(value));
     if (values.length === 0) return null;
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -620,7 +580,7 @@ export default function MarketDetailsPage() {
       return [min - offset, max + offset];
     }
     return [min, max];
-  }, [chartDataWithIndicators, layerState, supportsIndicatorRange]);
+  }, [aggregatedHistory]);
 
   const rsiChartData = useMemo(
     () =>
@@ -649,6 +609,55 @@ export default function MarketDetailsPage() {
       })),
     [indicatorData]
   );
+
+  const distChartData = useMemo(
+    () =>
+      indicatorData.map((item) => ({
+        time: new Date(item.time).toISOString(),
+        dist_ema20:
+          typeof item?.dist_ema20 === "number" && Number.isFinite(item.dist_ema20)
+            ? item.dist_ema20
+            : null,
+        dist_ema200:
+          typeof item?.dist_ema200 === "number" &&
+          Number.isFinite(item.dist_ema200)
+            ? item.dist_ema200
+            : null,
+      })),
+    [indicatorData]
+  );
+
+  const distDomain = useMemo(() => {
+    if (!layerState.distEma20 && !layerState.distEma200) return [-1, 1];
+    const values = [];
+    distChartData.forEach((point) => {
+      if (layerState.distEma20 && Number.isFinite(point.dist_ema20)) {
+        values.push(Math.abs(point.dist_ema20));
+      }
+      if (layerState.distEma200 && Number.isFinite(point.dist_ema200)) {
+        values.push(Math.abs(point.dist_ema200));
+      }
+    });
+    if (values.length === 0) return [-1, 1];
+    const maxAbs = Math.max(...values);
+    if (!Number.isFinite(maxAbs) || maxAbs === 0) return [-1, 1];
+    const padding = maxAbs * 0.1;
+    const upper = maxAbs + padding;
+    return [-upper, upper];
+  }, [distChartData, layerState.distEma20, layerState.distEma200]);
+
+  const hasDistValues = useMemo(
+    () =>
+      distChartData.some(
+        (point) =>
+          (layerState.distEma20 && Number.isFinite(point.dist_ema20)) ||
+          (layerState.distEma200 && Number.isFinite(point.dist_ema200))
+      ),
+    [distChartData, layerState.distEma20, layerState.distEma200]
+  );
+
+  const showDistPanel =
+    supportsIndicatorRange && (layerState.distEma20 || layerState.distEma200);
 
   const pivotLines = useMemo(() => {
     if (!pivotLevels) return [];
@@ -913,26 +922,6 @@ export default function MarketDetailsPage() {
                           connectNulls
                         />
                       )}
-                      {layerState.distEma20 && supportsIndicatorRange && (
-                        <Line
-                          type="monotone"
-                          dataKey="dist_ema20"
-                          stroke="#29B6F6"
-                          strokeWidth={1.5}
-                          dot={false}
-                          connectNulls
-                        />
-                      )}
-                      {layerState.distEma200 && supportsIndicatorRange && (
-                        <Line
-                          type="monotone"
-                          dataKey="dist_ema200"
-                          stroke="#AB47BC"
-                          strokeWidth={1.5}
-                          dot={false}
-                          connectNulls
-                        />
-                      )}
                       {layerState.atr14 && supportsIndicatorRange && (
                         <Line
                           type="monotone"
@@ -976,6 +965,86 @@ export default function MarketDetailsPage() {
 
         {supportsIndicatorRange && indicatorEnabled && (
           <div className="mt-6 space-y-6">
+            {showDistPanel && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl">
+                <div className="p-4 border-b border-gray-800">
+                  <h3 className="text-lg font-semibold">
+                    Distanza dalle EMA
+                  </h3>
+                </div>
+                <div className="p-4">
+                  {indicatorLoading ? (
+                    <p className="text-gray-400 text-sm">
+                      Caricamento distanza EMA...
+                    </p>
+                  ) : hasDistValues ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={distChartData}>
+                          <XAxis
+                            dataKey="time"
+                            stroke="#6B7280"
+                            tickFormatter={(value) =>
+                              new Date(value).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            }
+                          />
+                          <YAxis
+                            stroke="#6B7280"
+                            domain={distDomain}
+                            tickFormatter={(value) =>
+                              Number.isFinite(value)
+                                ? value.toFixed(Math.abs(value) < 1 ? 3 : 2)
+                                : ""
+                            }
+                          />
+                          <ReferenceLine
+                            y={0}
+                            stroke="#6B7280"
+                            strokeDasharray="4 4"
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#111827",
+                              border: "none",
+                              borderRadius: "0.75rem",
+                            }}
+                          />
+                          {layerState.distEma20 && (
+                            <Line
+                              type="monotone"
+                              dataKey="dist_ema20"
+                              stroke="#29B6F6"
+                              strokeWidth={1.5}
+                              dot={false}
+                              connectNulls
+                            />
+                          )}
+                          {layerState.distEma200 && (
+                            <Line
+                              type="monotone"
+                              dataKey="dist_ema200"
+                              stroke="#AB47BC"
+                              strokeWidth={1.5}
+                              dot={false}
+                              connectNulls
+                            />
+                          )}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-gray-400 text-sm">
+                      Nessun dato di distanza EMA disponibile per questo
+                      intervallo.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {layerState.rsi && (
               <div className="bg-gray-900 border border-gray-800 rounded-xl">
                 <div className="p-4 border-b border-gray-800 flex items-center justify-between">
