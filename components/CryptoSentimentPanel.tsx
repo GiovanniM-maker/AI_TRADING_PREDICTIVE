@@ -20,9 +20,11 @@ import {
 } from "recharts";
 
 interface SentimentRecord {
-  time: string;
-  date: string;
-  score: number;
+  time?: string;
+  date?: string;
+  score?: number;
+  value?: number;
+  classification?: string;
   color?: string;
   source?: string;
   updatedAt?: string;
@@ -63,7 +65,11 @@ export default function CryptoSentimentPanel({
       "sentiment"
     );
 
-    const latestQuery = query(sentimentRef, orderBy("time", "desc"), limit(1));
+    const latestQuery = query(
+      sentimentRef,
+      orderBy("time", "desc"),
+      limit(1)
+    );
     const historyQuery = query(
       sentimentRef,
       orderBy("time", "desc"),
@@ -98,8 +104,18 @@ export default function CryptoSentimentPanel({
         if (cancelled) return;
         const records = snapshot.docs
           .map((docSnap) => docSnap.data() as SentimentRecord)
-          .filter((item) => typeof item?.time === "string")
-          .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+          .filter((item) =>
+            typeof (item?.time ?? item?.updatedAt ?? item?.date) === "string"
+          )
+          .sort((a, b) => {
+            const aDate = new Date(
+              a.time ?? a.updatedAt ?? `${a.date ?? "1970-01-01"}T00:00:00.000Z`
+            ).getTime();
+            const bDate = new Date(
+              b.time ?? b.updatedAt ?? `${b.date ?? "1970-01-01"}T00:00:00.000Z`
+            ).getTime();
+            return aDate - bDate;
+          });
         setHistory(records);
         setLoading(false);
       },
@@ -122,20 +138,45 @@ export default function CryptoSentimentPanel({
     };
   }, [symbol, historyLimit]);
 
-  const sentimentColor = resolveScoreColor(latest?.score, latest?.color);
+  const resolvedScore = useMemo(() => {
+    if (!latest) return null;
+    const raw =
+      typeof latest.score === "number"
+        ? latest.score
+        : typeof latest.value === "number"
+        ? latest.value
+        : null;
+    return raw;
+  }, [latest]);
+
+  const sentimentColor = resolveScoreColor(resolvedScore ?? undefined, latest?.color);
 
   const chartData = useMemo(
     () =>
       history.map((item) => ({
-        date: item.date ?? new Date(item.time).toISOString().slice(0, 10),
-        score: item.score,
-        color: resolveScoreColor(item.score, item.color),
+        date:
+          item.date ??
+          new Date(
+            item.time ?? item.updatedAt ?? `${item.date ?? "1970-01-01"}T00:00:00.000Z`
+          )
+            .toISOString()
+            .slice(0, 10),
+        score:
+          typeof item.score === "number"
+            ? item.score
+            : typeof item.value === "number"
+            ? item.value
+            : null,
+        color: resolveScoreColor(
+          typeof item.score === "number" ? item.score : item.value,
+          item.color
+        ),
       })),
     [history]
   );
 
   const updatedLabel = useMemo(() => {
-    const iso = latest?.updatedAt ?? latest?.time;
+    const iso = latest?.updatedAt ?? latest?.time ?? null;
     if (!iso) return "-";
     try {
       return new Date(iso).toLocaleString();
@@ -156,14 +197,19 @@ export default function CryptoSentimentPanel({
           <p className="text-sm text-gray-400 mt-2">Caricamento sentiment...</p>
         ) : error ? (
           <p className="text-sm text-red-400 mt-2">{error}</p>
-        ) : latest ? (
+        ) : latest && resolvedScore != null ? (
           <div className="mt-4">
             <p
               className="text-4xl font-bold"
               style={{ color: sentimentColor }}
             >
-              {Math.round(latest.score)}
+              {Math.round(resolvedScore)}
             </p>
+            {latest?.classification && (
+              <p className="text-sm text-gray-300 mt-1">
+                {latest.classification}
+              </p>
+            )}
             <p className="text-xs text-gray-400 mt-1">Aggiornato: {updatedLabel}</p>
           </div>
         ) : (
@@ -191,6 +237,7 @@ export default function CryptoSentimentPanel({
                     borderRadius: "0.75rem",
                   }}
                   formatter={(value) => [`${value}`, "Score"]}
+                  labelFormatter={(label) => label}
                 />
                 <Line
                   type="monotone"
