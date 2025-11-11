@@ -68,6 +68,26 @@ function getBucketType(rangeValue) {
   }
 }
 
+function getDocInterval(rangeValue) {
+  switch (rangeValue) {
+    case "1h":
+      return 10 * 1000;
+    case "3h":
+    case "6h":
+    case "12h":
+    case "24h":
+    case "3d":
+    case "7d":
+    case "1m":
+      return 60 * 1000;
+    case "3m":
+    case "6m":
+      return 60 * 60 * 1000;
+    default:
+      return DAY_MS;
+  }
+}
+
 function formatCurrency(value) {
   if (typeof value !== "number") return "-";
   return `$${value.toLocaleString("en-US", {
@@ -210,7 +230,12 @@ export default function MarketDetailsPage() {
     })();
 
     const estimatedPoints = Math.ceil(rangeMs / bucketMs);
-    const fetchLimit = Math.min(Math.max(estimatedPoints + 50, 500), 20000);
+    const docInterval = getDocInterval(selectedRange);
+    const estimatedDocs = Math.ceil(rangeMs / docInterval);
+    const fetchLimit = Math.min(
+      Math.max(Math.max(estimatedPoints, estimatedDocs) + 200, 1000),
+      60000
+    );
 
     const historyRef = collection(
       doc(db, "crypto_prices", selectedCoin),
