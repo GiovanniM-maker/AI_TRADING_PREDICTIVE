@@ -610,6 +610,18 @@ export default function MarketDetailsPage() {
     [indicatorData]
   );
 
+  const atrChartData = useMemo(
+    () =>
+      indicatorData.map((item) => ({
+        time: new Date(item.time).toISOString(),
+        atr14:
+          typeof item?.atr14 === "number" && Number.isFinite(item.atr14)
+            ? item.atr14
+            : null,
+      })),
+    [indicatorData]
+  );
+
   const distChartData = useMemo(
     () =>
       indicatorData.map((item) => ({
@@ -656,8 +668,17 @@ export default function MarketDetailsPage() {
     [distChartData, layerState.distEma20, layerState.distEma200]
   );
 
+  const hasAtrValues = useMemo(
+    () =>
+      atrChartData.some(
+        (point) => layerState.atr14 && Number.isFinite(point.atr14)
+      ),
+    [atrChartData, layerState.atr14]
+  );
+
   const showDistPanel =
     supportsIndicatorRange && (layerState.distEma20 || layerState.distEma200);
+  const showAtrPanel = supportsIndicatorRange && layerState.atr14;
 
   const pivotLines = useMemo(() => {
     if (!pivotLevels) return [];
@@ -965,6 +986,61 @@ export default function MarketDetailsPage() {
 
         {supportsIndicatorRange && indicatorEnabled && (
           <div className="mt-6 space-y-6">
+            {showAtrPanel && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl">
+                <div className="p-4 border-b border-gray-800">
+                  <h3 className="text-lg font-semibold">ATR 14</h3>
+                </div>
+                <div className="p-4">
+                  {indicatorLoading ? (
+                    <p className="text-gray-400 text-sm">Caricamento ATR...</p>
+                  ) : hasAtrValues ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={atrChartData}>
+                          <XAxis
+                            dataKey="time"
+                            stroke="#6B7280"
+                            tickFormatter={(value) =>
+                              new Date(value).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            }
+                          />
+                          <YAxis stroke="#6B7280" domain={["auto", "auto"]} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: "#111827",
+                              border: "none",
+                              borderRadius: "0.75rem",
+                            }}
+                            formatter={(value) =>
+                              typeof value === "number"
+                                ? value.toFixed(value < 1 ? 4 : 2)
+                                : value
+                            }
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="atr14"
+                            stroke="#FF9800"
+                            strokeWidth={1.5}
+                            dot={false}
+                            connectNulls
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-gray-400 text-sm">
+                      Nessun dato ATR disponibile per questo intervallo.
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {showDistPanel && (
               <div className="bg-gray-900 border border-gray-800 rounded-xl">
                 <div className="p-4 border-b border-gray-800">
