@@ -557,10 +557,6 @@ export default function MarketDetailsPage() {
             indicator && typeof indicator.dist_ema200 === "number"
               ? indicator.dist_ema200
               : null,
-          atr14:
-            indicator && typeof indicator.atr14 === "number"
-              ? indicator.atr14
-              : null,
         };
       }),
     [chartData, indicatorByTime]
@@ -938,16 +934,6 @@ export default function MarketDetailsPage() {
                           type="monotone"
                           dataKey="ema200"
                           stroke="#a855f7"
-                          strokeWidth={1.5}
-                          dot={false}
-                          connectNulls
-                        />
-                      )}
-                      {layerState.atr14 && supportsIndicatorRange && (
-                        <Line
-                          type="monotone"
-                          dataKey="atr14"
-                          stroke="#FF9800"
                           strokeWidth={1.5}
                           dot={false}
                           connectNulls
