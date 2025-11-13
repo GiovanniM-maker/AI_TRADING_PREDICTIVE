@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { monitoredGetDocs } from "@/lib/firestore_monitored";
-import { monitor } from "@/lib/monitor";
+import { runtimeMonitor } from "@/lib/runtime_monitor";
 import {
   loadHistory,
   saveHistory,
@@ -22,20 +22,6 @@ import {
   saveIndicators,
   appendIndicators,
 } from "@/lib/cache_market";
-
-// Log monitor reference (for debugging)
-if (typeof window !== "undefined") {
-  console.log("[MARKET DETAILS] Monitor ref:", monitor);
-  if (window.__MONITOR_REF_CHECK__) {
-    if (monitor !== window.__MONITOR_REF_CHECK__) {
-      console.error("[MARKET DETAILS] WARNING: Different monitor instance!");
-    } else {
-      console.log("[MARKET DETAILS] Monitor ref verified - same instance");
-    }
-  } else {
-    window.__MONITOR_REF_CHECK__ = monitor;
-  }
-}
 import {
   LineChart,
   Line,
@@ -358,29 +344,25 @@ export default function MarketDetailsPage() {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
-      console.log("[DETAILS] full fetch triggered", { selectedCoin, selectedRange });
+      console.log("[MONITOR] FULL FETCH EXECUTED");
+      runtimeMonitor.fullFetchCount++;
+      console.log("[MONITOR] fullFetchCount:", runtimeMonitor.fullFetchCount);
       isFetching = true;
       try {
-        console.log("[FULL FETCH] Starting full fetch for", selectedCoin, selectedRange);
-        
         // 1. Try load from cache
         const cached = await loadHistory(selectedCoin, selectedRange);
         
         if (cached && Array.isArray(cached) && cached.length > 0) {
           // Cache hit: use cached data immediately
-          console.log("[FULL FETCH] Cache HIT - loaded", cached.length, "points from cache");
           if (!cancelled) {
             setHistory([...cached]);
+            runtimeMonitor.graphUpdates++;
+            console.log("[MONITOR] GRAPH UPDATED");
+            console.log("[MONITOR] graphUpdates:", runtimeMonitor.graphUpdates);
             if (cached.length > 0) {
               lastHistoryTimeRef.current = cached[cached.length - 1]?.time || null;
             }
             setLoading(false);
-            
-            // Track metrics (cache load)
-            monitor.fullFetchCount++;
-            monitor.lastFullFetchTimestamp = Date.now();
-            console.log("[MONITOR] After cache hit - fullFetchCount:", monitor.fullFetchCount, "cacheReads:", monitor.cacheReads);
-            console.log("[MONITOR] Full monitor object:", monitor);
             
             // Trigger incremental fetch immediately to get latest data
             isFetching = false;
@@ -390,7 +372,6 @@ export default function MarketDetailsPage() {
         }
 
         // 2. Cache miss: fetch from Firestore
-        console.log("[FULL FETCH] Cache MISS - fetching from Firestore");
         const fullQuery = query(
           historyRef,
           where("time", ">=", startIso),
@@ -410,26 +391,20 @@ export default function MarketDetailsPage() {
           })
           .map(({ originalDate, ...rest }) => rest);
 
-        console.log("[FULL FETCH] Fetched", ordered.length, "points from Firestore");
-
         if (!cancelled) {
-        setHistory([...ordered]);
+          setHistory([...ordered]);
+          runtimeMonitor.graphUpdates++;
+          console.log("[MONITOR] GRAPH UPDATED");
+          console.log("[MONITOR] graphUpdates:", runtimeMonitor.graphUpdates);
           // Update ref with last timestamp
           if (ordered.length > 0) {
             lastHistoryTimeRef.current = ordered[ordered.length - 1]?.time || null;
           }
-        setLoading(false);
+          setLoading(false);
           lastFullFetchTime = Date.now();
           
           // Save to cache
           await saveHistory(selectedCoin, selectedRange, ordered);
-          
-          // Track metrics
-          monitor.fullFetchCount++;
-          monitor.lastFullFetchTimestamp = Date.now();
-          monitor.pollingEvents++;
-          console.log("[MONITOR] After Firestore fetch - fullFetchCount:", monitor.fullFetchCount, "firestoreReads:", monitor.firestoreReads, "cacheWrites:", monitor.cacheWrites);
-          console.log("[MONITOR] Full monitor object:", monitor);
         }
       } catch (err) {
         console.error("[FULL FETCH] Error:", err);
@@ -451,7 +426,9 @@ export default function MarketDetailsPage() {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
-      console.log("[DETAILS] incremental fetch triggered", { selectedCoin, selectedRange });
+      console.log("[MONITOR] INCREMENTAL FETCH EXECUTED");
+      runtimeMonitor.incrementalFetchCount++;
+      console.log("[MONITOR] incrementalFetchCount:", runtimeMonitor.incrementalFetchCount);
       isFetching = true;
       try {
         console.log("[INCREMENTAL] Starting incremental fetch for", selectedCoin, selectedRange);
@@ -512,8 +489,6 @@ export default function MarketDetailsPage() {
 
         // Merge: append new points without removing existing ones (APPEND-ONLY)
         setHistory((prevHistory) => {
-          console.log("[INCREMENTAL] prev:", prevHistory.length, "new:", newDocs.length);
-          
           // Create map to avoid duplicates by time
           const existingMap = new Map();
           prevHistory.forEach((item) => {
@@ -537,22 +512,17 @@ export default function MarketDetailsPage() {
               return timeA - timeB;
             });
           
-          console.log("[INCREMENTAL] merged:", merged.length, "(prev:", prevHistory.length, "+ new:", newDocs.length, ")");
-          
           // Update ref with last timestamp
           if (merged.length > 0) {
             lastHistoryTimeRef.current = merged[merged.length - 1]?.time || null;
           }
           
+          runtimeMonitor.graphUpdates++;
+          console.log("[MONITOR] GRAPH UPDATED");
+          console.log("[MONITOR] graphUpdates:", runtimeMonitor.graphUpdates);
+          
           return merged;
         });
-
-        // Track metrics
-        monitor.incrementalFetchCount++;
-        monitor.lastIncrementalTimestamp = Date.now();
-        monitor.pollingEvents++;
-        console.log("[MONITOR] After incremental fetch - incrementalFetchCount:", monitor.incrementalFetchCount, "firestoreReads:", monitor.firestoreReads, "cacheWrites:", monitor.cacheWrites);
-        console.log("[MONITOR] Full monitor object:", monitor);
       } catch (err) {
         console.error("[INCREMENTAL] Error:", err);
       } finally {
@@ -565,6 +535,8 @@ export default function MarketDetailsPage() {
 
     // Polling every 30s: INCREMENTAL fetch (append new points only)
     pollingIntervalId = setInterval(() => {
+      runtimeMonitor.pollingCount++;
+      console.log("[MONITOR] pollingCount:", runtimeMonitor.pollingCount);
       fetchHistoryIncremental();
     }, 30000); // 30 seconds
 
@@ -803,6 +775,9 @@ export default function MarketDetailsPage() {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
+      console.log("[MONITOR] FULL FETCH EXECUTED (indicators)");
+      runtimeMonitor.fullFetchCount++;
+      console.log("[MONITOR] fullFetchCount:", runtimeMonitor.fullFetchCount);
       isFetching = true;
       try {
         // 1. Try load from cache
@@ -812,14 +787,13 @@ export default function MarketDetailsPage() {
           // Cache hit: use cached data immediately
           if (!cancelled) {
             setIndicatorData([...cached]);
+            runtimeMonitor.indicatorUpdates++;
+            console.log("[MONITOR] INDICATORS UPDATED");
+            console.log("[MONITOR] indicatorUpdates:", runtimeMonitor.indicatorUpdates);
             if (cached.length > 0) {
               lastIndicatorTimeRef.current = cached[cached.length - 1]?.time || null;
             }
             setIndicatorLoading(false);
-            
-            // Track metrics (cache load)
-            monitor.fullFetchCount++;
-            monitor.lastFullFetchTimestamp = Date.now();
             
             // Trigger incremental fetch immediately to get latest data
             isFetching = false;
@@ -847,21 +821,19 @@ export default function MarketDetailsPage() {
           });
 
         if (!cancelled) {
-        setIndicatorData(rows);
+          setIndicatorData(rows);
+          runtimeMonitor.indicatorUpdates++;
+          console.log("[MONITOR] INDICATORS UPDATED");
+          console.log("[MONITOR] indicatorUpdates:", runtimeMonitor.indicatorUpdates);
           // Update ref with last timestamp
           if (rows.length > 0) {
             lastIndicatorTimeRef.current = rows[rows.length - 1]?.time || null;
           }
-        setIndicatorLoading(false);
+          setIndicatorLoading(false);
           lastFullFetchTime = Date.now();
           
           // Save to cache
           await saveIndicators(selectedCoin, selectedRange, rows);
-          
-          // Track metrics
-          monitor.fullFetchCount++;
-          monitor.lastFullFetchTimestamp = Date.now();
-          monitor.pollingEvents++;
         }
       } catch (err) {
         console.error(err);
@@ -882,6 +854,9 @@ export default function MarketDetailsPage() {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
+      console.log("[MONITOR] INCREMENTAL FETCH EXECUTED (indicators)");
+      runtimeMonitor.incrementalFetchCount++;
+      console.log("[MONITOR] incrementalFetchCount:", runtimeMonitor.incrementalFetchCount);
       isFetching = true;
       try {
         // Get last timestamp from ref (or from current state)
@@ -950,13 +925,12 @@ export default function MarketDetailsPage() {
             lastIndicatorTimeRef.current = merged[merged.length - 1]?.time || null;
           }
           
+          runtimeMonitor.indicatorUpdates++;
+          console.log("[MONITOR] INDICATORS UPDATED");
+          console.log("[MONITOR] indicatorUpdates:", runtimeMonitor.indicatorUpdates);
+          
           return merged;
         });
-
-        // Track metrics
-        monitor.incrementalFetchCount++;
-        monitor.lastIncrementalTimestamp = Date.now();
-        monitor.pollingEvents++;
       } catch (err) {
         console.error(err);
       } finally {
