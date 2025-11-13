@@ -22,6 +22,27 @@ function formatDate(timestamp) {
 
 // Safe copy function to avoid reference issues
 function getMonitorSnapshot() {
+  // Ensure monitor is accessible
+  if (typeof monitor === "undefined") {
+    console.error("[Monitor] monitor object is undefined!");
+    return {
+      firestoreReads: 0,
+      firestoreWrites: 0,
+      firestoreErrors: 0,
+      firestoreLastReadTime: null,
+      firestoreLastWriteTime: null,
+      fullFetchCount: 0,
+      incrementalFetchCount: 0,
+      pollingEvents: 0,
+      lastFullFetchTimestamp: null,
+      lastIncrementalTimestamp: null,
+      lastFrontendHeartbeat: null,
+      tabVisible: true,
+      fps: 0,
+      errors: [],
+    };
+  }
+  
   return {
     firestoreReads: monitor.firestoreReads || 0,
     firestoreWrites: monitor.firestoreWrites || 0,
@@ -46,9 +67,26 @@ export default function MonitorPage() {
 
   useEffect(() => {
     setMounted(true);
+    
+    // Initialize heartbeat on mount
+    if (typeof monitor !== "undefined") {
+      monitor.lastFrontendHeartbeat = Date.now();
+      // Debug: log monitor state
+      console.log("[Monitor] Initial state:", {
+        firestoreReads: monitor.firestoreReads,
+        fullFetchCount: monitor.fullFetchCount,
+        incrementalFetchCount: monitor.incrementalFetchCount,
+      });
+    }
+    
+    // Update state immediately
+    setState(getMonitorSnapshot());
+    
+    // Then update every 1 second
     const id = setInterval(() => {
       try {
-        setState(getMonitorSnapshot());
+        const snapshot = getMonitorSnapshot();
+        setState(snapshot);
       } catch (err) {
         console.error("Error updating monitor state:", err);
       }
