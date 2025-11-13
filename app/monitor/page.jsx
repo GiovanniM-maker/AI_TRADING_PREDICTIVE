@@ -31,6 +31,8 @@ function getMonitorSnapshot() {
       firestoreErrors: 0,
       firestoreLastReadTime: null,
       firestoreLastWriteTime: null,
+      cacheReads: 0,
+      cacheWrites: 0,
       fullFetchCount: 0,
       incrementalFetchCount: 0,
       pollingEvents: 0,
@@ -49,6 +51,8 @@ function getMonitorSnapshot() {
     firestoreErrors: monitor.firestoreErrors || 0,
     firestoreLastReadTime: monitor.firestoreLastReadTime || null,
     firestoreLastWriteTime: monitor.firestoreLastWriteTime || null,
+    cacheReads: monitor.cacheReads || 0,
+    cacheWrites: monitor.cacheWrites || 0,
     fullFetchCount: monitor.fullFetchCount || 0,
     incrementalFetchCount: monitor.incrementalFetchCount || 0,
     pollingEvents: monitor.pollingEvents || 0,
@@ -147,6 +151,25 @@ export default function MonitorPage() {
               <div>
                 <p className="text-gray-400 text-sm">Last Write</p>
                 <p className="text-sm text-gray-300">{formatTime(state.firestoreLastWriteTime)}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Cache Section */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <h2 className="text-xl font-semibold mb-4 text-orange-400">Cache (IndexedDB)</h2>
+            <div className="space-y-3">
+              <div>
+                <p className="text-gray-400 text-sm">Cache Reads</p>
+                <p className="text-2xl font-bold text-orange-400">
+                  {(state.cacheReads || 0).toLocaleString()}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm">Cache Writes</p>
+                <p className="text-2xl font-bold text-orange-300">
+                  {(state.cacheWrites || 0).toLocaleString()}
+                </p>
               </div>
             </div>
           </div>

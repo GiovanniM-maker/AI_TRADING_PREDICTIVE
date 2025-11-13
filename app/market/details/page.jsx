@@ -15,6 +15,14 @@ import { auth, db } from "@/lib/firebase";
 import { monitoredGetDocs } from "@/lib/firestore_monitored";
 import { monitor } from "@/lib/monitor";
 import {
+  loadHistory,
+  saveHistory,
+  appendHistory,
+  loadIndicators,
+  saveIndicators,
+  appendIndicators,
+} from "@/lib/cache_market";
+import {
   LineChart,
   Line,
   XAxis,
@@ -275,11 +283,13 @@ export default function MarketDetailsPage() {
       const oneHour = 60 * 60 * 1000;
       const sixHours = 6 * oneHour;
       const oneDay = 24 * oneHour;
+      const threeDays = 3 * oneDay;
       
       if (rangeMs <= oneHour) return 500;
-      if (rangeMs <= sixHours) return 1000;
-      if (rangeMs <= oneDay) return 2000;
-      return 5000; // upper bound
+      if (rangeMs <= sixHours) return 2000;
+      if (rangeMs <= oneDay) return 5000;
+      if (rangeMs <= threeDays) return 15000;
+      return 15000; // upper bound
     };
     const fullLimit = getFullLimit(rangeMs);
 
@@ -329,13 +339,42 @@ export default function MarketDetailsPage() {
         .map(({ originalDate, ...rest }) => rest);
     };
 
-    // FULL FETCH: range-aware limit (for mount, range change, coin change, visibility after +1min, every 60min)
+    // FULL FETCH: cache-first (for mount, range change, coin change, visibility after +1min, every 60min)
     const fetchHistoryFull = async () => {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
       isFetching = true;
       try {
+        console.log("[FULL FETCH] Starting full fetch for", selectedCoin, selectedRange);
+        
+        // 1. Try load from cache
+        const cached = await loadHistory(selectedCoin, selectedRange);
+        
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          // Cache hit: use cached data immediately
+          console.log("[FULL FETCH] Cache HIT - loaded", cached.length, "points from cache");
+          if (!cancelled) {
+            setHistory([...cached]);
+            if (cached.length > 0) {
+              lastHistoryTimeRef.current = cached[cached.length - 1]?.time || null;
+            }
+            setLoading(false);
+            
+            // Track metrics (cache load)
+            monitor.fullFetchCount++;
+            monitor.lastFullFetchTimestamp = Date.now();
+            console.log("[MONITOR]", { fullFetchCount: monitor.fullFetchCount, cacheReads: monitor.cacheReads });
+            
+            // Trigger incremental fetch immediately to get latest data
+            isFetching = false;
+            fetchHistoryIncremental();
+            return;
+          }
+        }
+
+        // 2. Cache miss: fetch from Firestore
+        console.log("[FULL FETCH] Cache MISS - fetching from Firestore");
         const fullQuery = query(
           historyRef,
           where("time", ">=", startIso),
@@ -355,6 +394,8 @@ export default function MarketDetailsPage() {
           })
           .map(({ originalDate, ...rest }) => rest);
 
+        console.log("[FULL FETCH] Fetched", ordered.length, "points from Firestore");
+
         if (!cancelled) {
           setHistory([...ordered]);
           // Update ref with last timestamp
@@ -364,13 +405,21 @@ export default function MarketDetailsPage() {
           setLoading(false);
           lastFullFetchTime = Date.now();
           
+          // Save to cache
+          await saveHistory(selectedCoin, selectedRange, ordered);
+          
           // Track metrics
           monitor.fullFetchCount++;
           monitor.lastFullFetchTimestamp = Date.now();
           monitor.pollingEvents++;
+          console.log("[MONITOR]", { 
+            fullFetchCount: monitor.fullFetchCount, 
+            firestoreReads: monitor.firestoreReads,
+            cacheWrites: monitor.cacheWrites 
+          });
         }
       } catch (err) {
-        console.error(err);
+        console.error("[FULL FETCH] Error:", err);
         if (!cancelled) {
           setError(
             err?.message ??
@@ -391,14 +440,29 @@ export default function MarketDetailsPage() {
 
       isFetching = true;
       try {
-        // Get last timestamp from ref
-        const localLastTime = lastHistoryTimeRef.current;
+        console.log("[INCREMENTAL] Starting incremental fetch for", selectedCoin, selectedRange);
+        
+        // Get last timestamp from ref (or from current state)
+        let localLastTime = lastHistoryTimeRef.current;
+        
+        // If ref is empty, try to get from current state
+        if (!localLastTime) {
+          // Try to get from cache as fallback
+          const cached = await loadHistory(selectedCoin, selectedRange);
+          if (cached && Array.isArray(cached) && cached.length > 0) {
+            localLastTime = cached[cached.length - 1]?.time || null;
+            lastHistoryTimeRef.current = localLastTime;
+          }
+        }
         
         // Skip incremental if no local data (let FULL handle it)
         if (!localLastTime) {
+          console.log("[INCREMENTAL] No local data, skipping");
           isFetching = false;
           return;
         }
+
+        console.log("[INCREMENTAL] Querying for time >", localLastTime);
 
         // Query for new points after last local timestamp
         const incrementalQuery = query(
@@ -412,31 +476,54 @@ export default function MarketDetailsPage() {
 
         const newRecordsMap = processDocs(snapshot.docs);
         if (newRecordsMap.size === 0) {
+          console.log("[INCREMENTAL] No new points found");
           isFetching = false;
           return;
         }
 
-        // Merge: append new points without removing existing ones
+        // Convert map to array for cache append
+        const newDocs = Array.from(newRecordsMap.values())
+          .filter((item) => item?.originalDate instanceof Date)
+          .sort((a, b) => {
+            const timeA = a?.originalDate?.getTime?.() ?? 0;
+            const timeB = b?.originalDate?.getTime?.() ?? 0;
+            return timeA - timeB;
+          })
+          .map(({ originalDate, ...rest }) => rest);
+
+        console.log("[INCREMENTAL] Found", newDocs.length, "new points");
+
+        // Append to cache
+        await appendHistory(selectedCoin, selectedRange, newDocs);
+
+        // Merge: append new points without removing existing ones (APPEND-ONLY)
         setHistory((prevHistory) => {
+          console.log("[INCREMENTAL] prev:", prevHistory.length, "new:", newDocs.length);
+          
+          // Create map to avoid duplicates by time
           const existingMap = new Map();
           prevHistory.forEach((item) => {
             if (item?.time) {
               existingMap.set(item.time, item);
             }
           });
-          // Add new points
-          newRecordsMap.forEach((value, key) => {
-            existingMap.set(key, value);
+          // Add new points (will overwrite duplicates if any)
+          newDocs.forEach((item) => {
+            if (item?.time) {
+              existingMap.set(item.time, item);
+            }
           });
+          
           // Return sorted array (only append, never shrink)
           const merged = Array.from(existingMap.values())
-            .filter((item) => item?.originalDate instanceof Date)
+            .filter((item) => item?.time) // Remove items without time
             .sort((a, b) => {
-              const timeA = a?.originalDate?.getTime?.() ?? 0;
-              const timeB = b?.originalDate?.getTime?.() ?? 0;
+              const timeA = a?.time ? new Date(a.time).getTime() : 0;
+              const timeB = b?.time ? new Date(b.time).getTime() : 0;
               return timeA - timeB;
-            })
-            .map(({ originalDate, ...rest }) => rest);
+            });
+          
+          console.log("[INCREMENTAL] merged:", merged.length, "(prev:", prevHistory.length, "+ new:", newDocs.length, ")");
           
           // Update ref with last timestamp
           if (merged.length > 0) {
@@ -450,8 +537,13 @@ export default function MarketDetailsPage() {
         monitor.incrementalFetchCount++;
         monitor.lastIncrementalTimestamp = Date.now();
         monitor.pollingEvents++;
+        console.log("[MONITOR]", { 
+          incrementalFetchCount: monitor.incrementalFetchCount, 
+          firestoreReads: monitor.firestoreReads,
+          cacheWrites: monitor.cacheWrites 
+        });
       } catch (err) {
-        console.error(err);
+        console.error("[INCREMENTAL] Error:", err);
       } finally {
         isFetching = false;
       }
@@ -638,11 +730,13 @@ export default function MarketDetailsPage() {
       const oneHour = 60 * 60 * 1000;
       const sixHours = 6 * oneHour;
       const oneDay = 24 * oneHour;
+      const threeDays = 3 * oneDay;
       
       if (rangeMs <= oneHour) return 500;
-      if (rangeMs <= sixHours) return 1000;
-      if (rangeMs <= oneDay) return 2000;
-      return 5000; // upper bound
+      if (rangeMs <= sixHours) return 2000;
+      if (rangeMs <= oneDay) return 5000;
+      if (rangeMs <= threeDays) return 15000;
+      return 15000; // upper bound
     };
     const fullLimit = getFullLimit(rangeMs);
 
@@ -693,13 +787,37 @@ export default function MarketDetailsPage() {
         });
     };
 
-    // FULL FETCH: range-aware limit (for mount, range change, coin change, visibility after +1min, every 60min)
+    // FULL FETCH: cache-first (for mount, range change, coin change, visibility after +1min, every 60min)
     const fetchIndicatorsFull = async () => {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
       isFetching = true;
       try {
+        // 1. Try load from cache
+        const cached = await loadIndicators(selectedCoin, selectedRange);
+        
+        if (cached && Array.isArray(cached) && cached.length > 0) {
+          // Cache hit: use cached data immediately
+          if (!cancelled) {
+            setIndicatorData([...cached]);
+            if (cached.length > 0) {
+              lastIndicatorTimeRef.current = cached[cached.length - 1]?.time || null;
+            }
+            setIndicatorLoading(false);
+            
+            // Track metrics (cache load)
+            monitor.fullFetchCount++;
+            monitor.lastFullFetchTimestamp = Date.now();
+            
+            // Trigger incremental fetch immediately to get latest data
+            isFetching = false;
+            fetchIndicatorsIncremental();
+            return;
+          }
+        }
+
+        // 2. Cache miss: fetch from Firestore
         const fullQuery = query(
           indicatorsRef,
           where("time", ">=", startIso),
@@ -725,6 +843,9 @@ export default function MarketDetailsPage() {
           }
           setIndicatorLoading(false);
           lastFullFetchTime = Date.now();
+          
+          // Save to cache
+          await saveIndicators(selectedCoin, selectedRange, rows);
           
           // Track metrics
           monitor.fullFetchCount++;
@@ -752,8 +873,18 @@ export default function MarketDetailsPage() {
 
       isFetching = true;
       try {
-        // Get last timestamp from ref
-        const localLastTime = lastIndicatorTimeRef.current;
+        // Get last timestamp from ref (or from current state)
+        let localLastTime = lastIndicatorTimeRef.current;
+        
+        // If ref is empty, try to get from current state
+        if (!localLastTime) {
+          // Try to get from cache as fallback
+          const cached = await loadIndicators(selectedCoin, selectedRange);
+          if (cached && Array.isArray(cached) && cached.length > 0) {
+            localLastTime = cached[cached.length - 1]?.time || null;
+            lastIndicatorTimeRef.current = localLastTime;
+          }
+        }
         
         // Skip incremental if no local data (let FULL handle it)
         if (!localLastTime) {
@@ -776,6 +907,9 @@ export default function MarketDetailsPage() {
           isFetching = false;
           return;
         }
+
+        // Append to cache
+        await appendIndicators(selectedCoin, selectedRange, newRows);
 
         // Merge: append new points without removing existing ones
         setIndicatorData((prevData) => {
