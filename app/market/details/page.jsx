@@ -243,6 +243,8 @@ export default function MarketDetailsPage() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    let intervalId = null;
+    let isFetching = false;
 
     setHistory([]);
     setLoading(true);
@@ -252,27 +254,6 @@ export default function MarketDetailsPage() {
     const now = new Date();
     const start = new Date(now.getTime() - (range?.ms ?? 0));
     const startIso = start.toISOString();
-    const rangeMs = range?.ms ?? DAY_MS;
-
-    const bucketMs = (() => {
-      switch (getBucketType(selectedRange)) {
-        case "minute":
-          return 60 * 1000;
-        case "hour":
-          return 60 * 60 * 1000;
-        case "day":
-        default:
-          return DAY_MS;
-      }
-    })();
-
-    const estimatedPoints = Math.ceil(rangeMs / bucketMs);
-    const docInterval = getDocInterval(selectedRange);
-    const estimatedDocs = Math.ceil(rangeMs / docInterval);
-    const fetchLimit = Math.min(
-      Math.max(Math.max(estimatedPoints, estimatedDocs) + 200, 1000),
-      60000
-    );
 
     const historyRef = collection(
       doc(db, "crypto_prices", selectedCoin),
@@ -282,13 +263,20 @@ export default function MarketDetailsPage() {
       historyRef,
       where("time", ">=", startIso),
       orderBy("time", "asc"),
-      limit(fetchLimit)
+      limit(500)
     );
 
-    const unsubscribe = onSnapshot(
-      historyQuery,
-      (snapshot) => {
+    const fetchHistory = async () => {
+      // Skip if tab is hidden or already fetching
+      if (document.visibilityState === "hidden" || isFetching || cancelled) {
+        return;
+      }
+
+      isFetching = true;
+      try {
+        const snapshot = await getDocs(historyQuery);
         if (cancelled) return;
+
         const recordsMap = new Map();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
@@ -314,10 +302,12 @@ export default function MarketDetailsPage() {
         const ordered = Array.from(recordsMap.values())
           .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
           .map(({ originalDate, ...rest }) => rest);
-        setHistory([...ordered]);
-        setLoading(false);
-      },
-      (err) => {
+        
+        if (!cancelled) {
+          setHistory([...ordered]);
+          setLoading(false);
+        }
+      } catch (err) {
         console.error(err);
         if (!cancelled) {
           setError(
@@ -327,12 +317,33 @@ export default function MarketDetailsPage() {
           setHistory([]);
           setLoading(false);
         }
+      } finally {
+        isFetching = false;
       }
-    );
+    };
+
+    // Initial fetch
+    fetchHistory();
+
+    // Poll every 4 seconds (configurable: 3-5 seconds)
+    intervalId = setInterval(() => {
+      fetchHistory();
+    }, 4000);
+
+    // Also fetch when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && !isFetching && !cancelled) {
+        fetchHistory();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [user, selectedCoin, selectedRange]);
 
@@ -449,6 +460,8 @@ export default function MarketDetailsPage() {
     }
 
     let cancelled = false;
+    let intervalId = null;
+    let isFetching = false;
 
     setIndicatorLoading(true);
     setIndicatorError(null);
@@ -457,12 +470,6 @@ export default function MarketDetailsPage() {
     const now = new Date();
     const start = new Date(now.getTime() - (range?.ms ?? 0));
     const startIso = start.toISOString();
-    const rangeMs = range?.ms ?? DAY_MS;
-    const docInterval = getDocInterval(selectedRange);
-    const fetchLimit = Math.min(
-      Math.max(Math.ceil(rangeMs / docInterval) + 200, 1000),
-      60000
-    );
 
     const indicatorsRef = collection(
       doc(db, "crypto_prices", selectedCoin),
@@ -472,13 +479,20 @@ export default function MarketDetailsPage() {
       indicatorsRef,
       where("time", ">=", startIso),
       orderBy("time", "asc"),
-      limit(fetchLimit)
+      limit(500)
     );
 
-    const unsubscribe = onSnapshot(
-      indicatorQuery,
-      (snapshot) => {
+    const fetchIndicators = async () => {
+      // Skip if tab is hidden or already fetching
+      if (document.visibilityState === "hidden" || isFetching || cancelled) {
+        return;
+      }
+
+      isFetching = true;
+      try {
+        const snapshot = await getDocs(indicatorQuery);
         if (cancelled) return;
+
         const rows = snapshot.docs
           .map((docSnap) => docSnap.data())
           .map((item) => {
@@ -496,10 +510,12 @@ export default function MarketDetailsPage() {
           })
           .filter((item) => item !== null)
           .sort((a, b) => a.date.getTime() - b.date.getTime());
-        setIndicatorData(rows);
-        setIndicatorLoading(false);
-      },
-      (err) => {
+        
+        if (!cancelled) {
+          setIndicatorData(rows);
+          setIndicatorLoading(false);
+        }
+      } catch (err) {
         console.error(err);
         if (!cancelled) {
           setIndicatorError(
@@ -508,12 +524,33 @@ export default function MarketDetailsPage() {
           setIndicatorData([]);
           setIndicatorLoading(false);
         }
+      } finally {
+        isFetching = false;
       }
-    );
+    };
+
+    // Initial fetch
+    fetchIndicators();
+
+    // Poll every 4 seconds (configurable: 3-5 seconds)
+    intervalId = setInterval(() => {
+      fetchIndicators();
+    }, 4000);
+
+    // Also fetch when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible" && !isFetching && !cancelled) {
+        fetchIndicators();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [
     user,
