@@ -20,12 +20,38 @@ function formatDate(timestamp) {
   return new Date(timestamp).toLocaleString();
 }
 
+// Safe copy function to avoid reference issues
+function getMonitorSnapshot() {
+  return {
+    firestoreReads: monitor.firestoreReads || 0,
+    firestoreWrites: monitor.firestoreWrites || 0,
+    firestoreErrors: monitor.firestoreErrors || 0,
+    firestoreLastReadTime: monitor.firestoreLastReadTime || null,
+    firestoreLastWriteTime: monitor.firestoreLastWriteTime || null,
+    fullFetchCount: monitor.fullFetchCount || 0,
+    incrementalFetchCount: monitor.incrementalFetchCount || 0,
+    pollingEvents: monitor.pollingEvents || 0,
+    lastFullFetchTimestamp: monitor.lastFullFetchTimestamp || null,
+    lastIncrementalTimestamp: monitor.lastIncrementalTimestamp || null,
+    lastFrontendHeartbeat: monitor.lastFrontendHeartbeat || null,
+    tabVisible: monitor.tabVisible !== undefined ? monitor.tabVisible : true,
+    fps: monitor.fps || 0,
+    errors: Array.isArray(monitor.errors) ? [...monitor.errors] : [],
+  };
+}
+
 export default function MonitorPage() {
-  const [state, setState] = useState({ ...monitor });
+  const [state, setState] = useState(() => getMonitorSnapshot());
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const id = setInterval(() => {
-      setState({ ...monitor });
+      try {
+        setState(getMonitorSnapshot());
+      } catch (err) {
+        console.error("Error updating monitor state:", err);
+      }
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -35,6 +61,17 @@ export default function MonitorPage() {
     if (value >= thresholds.warning) return "text-yellow-400";
     return "text-red-400";
   };
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-black text-white p-6 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold mb-4">Loading Monitor...</h1>
+          <p className="text-gray-400">Initializing monitoring dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black text-white p-6">
@@ -49,14 +86,14 @@ export default function MonitorPage() {
             <div className="space-y-3">
               <div>
                 <p className="text-gray-400 text-sm">Reads</p>
-                <p className={`text-2xl font-bold ${getColor(state.firestoreReads, { good: 0, warning: 1000 })}`}>
-                  {state.firestoreReads.toLocaleString()}
+                <p className={`text-2xl font-bold ${getColor(state.firestoreReads || 0, { good: 0, warning: 1000 })}`}>
+                  {(state.firestoreReads || 0).toLocaleString()}
                 </p>
               </div>
               <div>
                 <p className="text-gray-400 text-sm">Writes</p>
-                <p className={`text-2xl font-bold ${getColor(state.firestoreWrites, { good: 0, warning: 100 })}`}>
-                  {state.firestoreWrites.toLocaleString()}
+                <p className={`text-2xl font-bold ${getColor(state.firestoreWrites || 0, { good: 0, warning: 100 })}`}>
+                  {(state.firestoreWrites || 0).toLocaleString()}
                 </p>
               </div>
               <div>
@@ -83,19 +120,19 @@ export default function MonitorPage() {
               <div>
                 <p className="text-gray-400 text-sm">Full Fetches</p>
                 <p className="text-2xl font-bold text-blue-400">
-                  {state.fullFetchCount.toLocaleString()}
+                  {(state.fullFetchCount || 0).toLocaleString()}
                 </p>
               </div>
               <div>
                 <p className="text-gray-400 text-sm">Incremental Fetches</p>
                 <p className="text-2xl font-bold text-green-400">
-                  {state.incrementalFetchCount.toLocaleString()}
+                  {(state.incrementalFetchCount || 0).toLocaleString()}
                 </p>
               </div>
               <div>
                 <p className="text-gray-400 text-sm">Polling Events</p>
                 <p className="text-2xl font-bold text-yellow-400">
-                  {state.pollingEvents.toLocaleString()}
+                  {(state.pollingEvents || 0).toLocaleString()}
                 </p>
               </div>
               <div>
@@ -115,8 +152,8 @@ export default function MonitorPage() {
             <div className="space-y-3">
               <div>
                 <p className="text-gray-400 text-sm">FPS</p>
-                <p className={`text-2xl font-bold ${getColor(state.fps, { good: 30, warning: 20 })}`}>
-                  {state.fps}
+                <p className={`text-2xl font-bold ${getColor(state.fps || 0, { good: 30, warning: 20 })}`}>
+                  {state.fps || 0}
                 </p>
               </div>
               <div>
@@ -136,7 +173,7 @@ export default function MonitorPage() {
         {/* Error Log Section */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-xl font-semibold mb-4 text-red-400">Error Log</h2>
-          {state.errors.length === 0 ? (
+          {!state.errors || state.errors.length === 0 ? (
             <p className="text-gray-400">No errors recorded</p>
           ) : (
             <div className="space-y-2 max-h-96 overflow-y-auto">
@@ -146,8 +183,8 @@ export default function MonitorPage() {
                   className="bg-gray-800 border border-red-900/50 rounded-lg p-4"
                 >
                   <div className="flex justify-between items-start mb-2">
-                    <p className="text-red-400 font-semibold">{error.message}</p>
-                    <p className="text-gray-500 text-xs">{formatDate(error.time)}</p>
+                    <p className="text-red-400 font-semibold">{error?.message || "Unknown error"}</p>
+                    <p className="text-gray-500 text-xs">{formatDate(error?.time)}</p>
                   </div>
                 </div>
               ))}
@@ -162,25 +199,25 @@ export default function MonitorPage() {
             <div>
               <p className="text-gray-400 text-sm">Total Reads</p>
               <p className="text-2xl font-bold text-white">
-                {state.firestoreReads.toLocaleString()}
+                {(state.firestoreReads || 0).toLocaleString()}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                ~${(state.firestoreReads * 0.00006).toFixed(4)} (at $0.06/100k reads)
+                ~${((state.firestoreReads || 0) * 0.00006).toFixed(4)} (at $0.06/100k reads)
               </p>
             </div>
             <div>
               <p className="text-gray-400 text-sm">Total Writes</p>
               <p className="text-2xl font-bold text-white">
-                {state.firestoreWrites.toLocaleString()}
+                {(state.firestoreWrites || 0).toLocaleString()}
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                ~${(state.firestoreWrites * 0.00018).toFixed(4)} (at $0.18/100k writes)
+                ~${((state.firestoreWrites || 0) * 0.00018).toFixed(4)} (at $0.18/100k writes)
               </p>
             </div>
             <div>
               <p className="text-gray-400 text-sm">Estimated Total</p>
               <p className="text-2xl font-bold text-yellow-400">
-                ${((state.firestoreReads * 0.00006) + (state.firestoreWrites * 0.00018)).toFixed(4)}
+                ${(((state.firestoreReads || 0) * 0.00006) + ((state.firestoreWrites || 0) * 0.00018)).toFixed(4)}
               </p>
               <p className="text-xs text-gray-500 mt-1">Current session estimate</p>
             </div>
