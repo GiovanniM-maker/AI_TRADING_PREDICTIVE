@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { getCurrentPrice } from "@/utils/coingecko";
 import { db } from "@/lib/firebase";
 import {
-  getDocs,
   collection,
   doc,
-  setDoc,
 } from "firebase/firestore";
+import {
+  monitoredGetDocs,
+  monitoredSetDoc,
+} from "@/lib/firestore_monitored";
 
 export async function GET() {
   try {
-    const snap = await getDocs(collection(db, "coins"));
+    const snap = await monitoredGetDocs(collection(db, "coins"));
     const now = Date.now();
     let updated = 0;
 
@@ -20,14 +22,14 @@ export async function GET() {
       const price = priceObj?.[coinId]?.usd;
       if (typeof price !== "number") continue;
 
-      await setDoc(
+      await monitoredSetDoc(
         doc(db, "coins", coinId, "prices", String(now)),
         {
           price,
           ts: new Date(now),
         }
       );
-      await setDoc(
+      await monitoredSetDoc(
         doc(db, "coins", coinId),
         {
           lastPrice: price,

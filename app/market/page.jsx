@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   collection,
   doc,
-  getDocs,
   getFirestore,
   limit,
   query,
@@ -12,6 +11,7 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { monitoredGetDocs } from "@/lib/firestore_monitored";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   ResponsiveContainer,
@@ -106,7 +106,7 @@ export default function MarketPage() {
           orderBy("time", "desc"),
           limit(10)
         );
-        const snapshot = await getDocs(historyQuery);
+        const snapshot = await monitoredGetDocs(historyQuery);
         const historyData = snapshot.docs
           .map((docSnap) => docSnap.data())
           .filter(

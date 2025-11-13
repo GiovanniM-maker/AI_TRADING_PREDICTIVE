@@ -3,10 +3,10 @@ import { getMarketChart } from "@/utils/coingecko";
 import { db } from "@/lib/firebase";
 import {
   doc,
-  setDoc,
   collection,
   writeBatch,
 } from "firebase/firestore";
+import { monitoredSetDoc } from "@/lib/firestore_monitored";
 
 const coins = [
   {
@@ -55,7 +55,7 @@ export async function POST() {
 
     for (const coin of coins) {
       const ref = doc(db, "coins", coin.id);
-      await setDoc(
+      await monitoredSetDoc(
         ref,
         { ...coin, updatedAt: new Date() },
         { merge: true }
