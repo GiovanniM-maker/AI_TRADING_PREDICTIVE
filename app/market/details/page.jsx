@@ -140,7 +140,9 @@ function aggregateForRange(points, bucketType) {
     const bucketDate = truncateDate(date, bucketType);
     const key = bucketDate.toISOString();
     const existing = map.get(key);
-    if (!existing || date.getTime() > existing.originalDate.getTime()) {
+    const existingTime = existing?.originalDate?.getTime?.() ?? 0;
+    const currentTime = date?.getTime?.() ?? 0;
+    if (!existing || currentTime > existingTime) {
       map.set(key, {
         ...point,
         date: bucketDate,
@@ -150,7 +152,11 @@ function aggregateForRange(points, bucketType) {
   });
 
   return Array.from(map.values())
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .sort((a, b) => {
+      const timeA = a?.date?.getTime?.() ?? 0;
+      const timeB = b?.date?.getTime?.() ?? 0;
+      return timeA - timeB;
+    })
     .map(({ originalDate, ...rest }) => rest);
 }
 
@@ -296,7 +302,12 @@ export default function MarketDetailsPage() {
       const merged = new Map(existingMap);
       newMap.forEach((value, key) => merged.set(key, value));
       return Array.from(merged.values())
-        .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
+        .filter((item) => item?.originalDate instanceof Date)
+        .sort((a, b) => {
+          const timeA = a?.originalDate?.getTime?.() ?? 0;
+          const timeB = b?.originalDate?.getTime?.() ?? 0;
+          return timeA - timeB;
+        })
         .map(({ originalDate, ...rest }) => rest);
     };
 
@@ -318,7 +329,12 @@ export default function MarketDetailsPage() {
 
         const recordsMap = processDocs(snapshot.docs);
         const ordered = Array.from(recordsMap.values())
-          .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
+          .filter((item) => item?.originalDate instanceof Date)
+          .sort((a, b) => {
+            const timeA = a?.originalDate?.getTime?.() ?? 0;
+            const timeB = b?.originalDate?.getTime?.() ?? 0;
+            return timeA - timeB;
+          })
           .map(({ originalDate, ...rest }) => rest);
 
         if (!cancelled) {
@@ -587,14 +603,22 @@ export default function MarketDetailsPage() {
     const mergeAndSort = (existingRows, newRows) => {
       const mergedMap = new Map();
       existingRows.forEach((item) => {
-        mergedMap.set(item.time, item);
+        if (item?.time) {
+          mergedMap.set(item.time, item);
+        }
       });
       newRows.forEach((item) => {
-        mergedMap.set(item.time, item);
+        if (item?.time) {
+          mergedMap.set(item.time, item);
+        }
       });
-      return Array.from(mergedMap.values()).sort(
-        (a, b) => a.date.getTime() - b.date.getTime()
-      );
+      return Array.from(mergedMap.values())
+        .filter((item) => item?.date instanceof Date)
+        .sort((a, b) => {
+          const timeA = a?.date?.getTime?.() ?? 0;
+          const timeB = b?.date?.getTime?.() ?? 0;
+          return timeA - timeB;
+        });
     };
 
     // FULL FETCH: limit 500 (for mount, range change, coin change, visibility after +1min, hourly)
@@ -613,9 +637,13 @@ export default function MarketDetailsPage() {
         const snapshot = await monitoredGetDocs(fullQuery);
         if (cancelled) return;
 
-        const rows = processDocs(snapshot.docs).sort(
-          (a, b) => a.date.getTime() - b.date.getTime()
-        );
+        const rows = processDocs(snapshot.docs)
+          .filter((item) => item?.date instanceof Date)
+          .sort((a, b) => {
+            const timeA = a?.date?.getTime?.() ?? 0;
+            const timeB = b?.date?.getTime?.() ?? 0;
+            return timeA - timeB;
+          });
 
         if (!cancelled) {
           setIndicatorData(rows);
