@@ -243,8 +243,11 @@ export default function MarketDetailsPage() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    let intervalId = null;
+    let pollingIntervalId = null;
+    let fullRefreshIntervalId = null;
     let isFetching = false;
+    let lastHiddenTime = null;
+    let lastFullFetchTime = Date.now();
 
     setHistory([]);
     setLoading(true);
@@ -259,53 +262,68 @@ export default function MarketDetailsPage() {
       doc(db, "crypto_prices", selectedCoin),
       "history_yahoo"
     );
-    const historyQuery = query(
-      historyRef,
-      where("time", ">=", startIso),
-      orderBy("time", "asc"),
-      limit(500)
-    );
 
-    const fetchHistory = async () => {
-      // Skip if tab is hidden or already fetching
-      if (document.visibilityState === "hidden" || isFetching || cancelled) {
-        return;
-      }
+    // Helper: process documents into records map
+    const processDocs = (docs) => {
+      const recordsMap = new Map();
+      docs.forEach((docSnap) => {
+        const data = docSnap.data();
+        const price =
+          typeof data?.close === "number"
+            ? data.close
+            : typeof data?.close_usd === "number"
+            ? data.close_usd
+            : null;
+        const iso =
+          typeof data?.time === "string"
+            ? data.time
+            : data?.time?.toDate?.()?.toISOString?.() ?? null;
+        if (price === null || !iso) return;
+        const pointDate = new Date(iso);
+        recordsMap.set(iso, {
+          close: price,
+          time: iso,
+          date: truncateDate(pointDate, getBucketType(selectedRange)),
+          originalDate: pointDate,
+        });
+      });
+      return recordsMap;
+    };
+
+    // Helper: merge and sort records
+    const mergeAndSort = (existingMap, newMap) => {
+      const merged = new Map(existingMap);
+      newMap.forEach((value, key) => merged.set(key, value));
+      return Array.from(merged.values())
+        .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
+        .map(({ originalDate, ...rest }) => rest);
+    };
+
+    // FULL FETCH: limit 500 (for mount, range change, coin change, visibility after +1min, hourly)
+    const fetchHistoryFull = async () => {
+      if (isFetching || cancelled) return;
+      if (document.visibilityState === "hidden") return;
 
       isFetching = true;
       try {
-        const snapshot = await getDocs(historyQuery);
+        const fullQuery = query(
+          historyRef,
+          where("time", ">=", startIso),
+          orderBy("time", "asc"),
+          limit(500)
+        );
+        const snapshot = await getDocs(fullQuery);
         if (cancelled) return;
 
-        const recordsMap = new Map();
-        snapshot.docs.forEach((docSnap) => {
-          const data = docSnap.data();
-          const price =
-            typeof data?.close === "number"
-              ? data.close
-              : typeof data?.close_usd === "number"
-              ? data.close_usd
-              : null;
-          const iso =
-            typeof data?.time === "string"
-              ? data.time
-              : data?.time?.toDate?.()?.toISOString?.() ?? null;
-          if (price === null || !iso) return;
-          const pointDate = new Date(iso);
-          recordsMap.set(iso, {
-            close: price,
-            time: iso,
-            date: truncateDate(pointDate, getBucketType(selectedRange)),
-            originalDate: pointDate,
-          });
-        });
+        const recordsMap = processDocs(snapshot.docs);
         const ordered = Array.from(recordsMap.values())
           .sort((a, b) => a.originalDate.getTime() - b.originalDate.getTime())
           .map(({ originalDate, ...rest }) => rest);
-        
+
         if (!cancelled) {
           setHistory([...ordered]);
           setLoading(false);
+          lastFullFetchTime = Date.now();
         }
       } catch (err) {
         console.error(err);
@@ -322,26 +340,81 @@ export default function MarketDetailsPage() {
       }
     };
 
-    // Initial fetch
-    fetchHistory();
+    // INCREMENTAL FETCH: limit 5 (for polling every 4s)
+    const fetchHistoryIncremental = async () => {
+      if (isFetching || cancelled) return;
+      if (document.visibilityState === "hidden") return;
 
-    // Poll every 4 seconds (configurable: 3-5 seconds)
-    intervalId = setInterval(() => {
-      fetchHistory();
+      isFetching = true;
+      try {
+        const incrementalQuery = query(
+          historyRef,
+          where("time", ">=", startIso),
+          orderBy("time", "desc"),
+          limit(5)
+        );
+        const snapshot = await getDocs(incrementalQuery);
+        if (cancelled) return;
+
+        const newRecordsMap = processDocs(snapshot.docs);
+        if (newRecordsMap.size === 0) {
+          isFetching = false;
+          return;
+        }
+
+        // Merge with existing history
+        setHistory((prevHistory) => {
+          const existingMap = new Map();
+          prevHistory.forEach((item) => {
+            existingMap.set(item.time, item);
+          });
+          return mergeAndSort(existingMap, newRecordsMap);
+        });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    // Initial FULL fetch on mount
+    fetchHistoryFull();
+
+    // Polling every 4s: INCREMENTAL fetch (only 5 docs)
+    pollingIntervalId = setInterval(() => {
+      fetchHistoryIncremental();
     }, 4000);
 
-    // Also fetch when tab becomes visible
+    // Full refresh every hour (3600s)
+    fullRefreshIntervalId = setInterval(() => {
+      fetchHistoryFull();
+    }, 3600000);
+
+    // Handle visibility change
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && !isFetching && !cancelled) {
-        fetchHistory();
+      if (cancelled) return;
+
+      if (document.visibilityState === "hidden") {
+        lastHiddenTime = Date.now();
+      } else if (document.visibilityState === "visible") {
+        // Full fetch if tab was hidden for more than 1 minute
+        if (lastHiddenTime && Date.now() - lastHiddenTime > 60000) {
+          if (!isFetching) {
+            fetchHistoryFull();
+          }
+        }
+        lastHiddenTime = null;
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      if (intervalId) {
-        clearInterval(intervalId);
+      if (pollingIntervalId) {
+        clearInterval(pollingIntervalId);
+      }
+      if (fullRefreshIntervalId) {
+        clearInterval(fullRefreshIntervalId);
       }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
@@ -460,8 +533,11 @@ export default function MarketDetailsPage() {
     }
 
     let cancelled = false;
-    let intervalId = null;
+    let pollingIntervalId = null;
+    let fullRefreshIntervalId = null;
     let isFetching = false;
+    let lastHiddenTime = null;
+    let lastFullFetchTime = Date.now();
 
     setIndicatorLoading(true);
     setIndicatorError(null);
@@ -475,45 +551,65 @@ export default function MarketDetailsPage() {
       doc(db, "crypto_prices", selectedCoin),
       "indicatori"
     );
-    const indicatorQuery = query(
-      indicatorsRef,
-      where("time", ">=", startIso),
-      orderBy("time", "asc"),
-      limit(500)
-    );
 
-    const fetchIndicators = async () => {
-      // Skip if tab is hidden or already fetching
-      if (document.visibilityState === "hidden" || isFetching || cancelled) {
-        return;
-      }
+    // Helper: process documents into rows
+    const processDocs = (docs) => {
+      return docs
+        .map((docSnap) => docSnap.data())
+        .map((item) => {
+          const iso =
+            typeof item?.time === "string"
+              ? item.time
+              : item?.time?.toDate?.()?.toISOString?.() ?? null;
+          if (!iso) return null;
+          const date = new Date(iso);
+          return {
+            ...item,
+            time: iso,
+            date,
+          };
+        })
+        .filter((item) => item !== null);
+    };
+
+    // Helper: merge and sort indicators
+    const mergeAndSort = (existingRows, newRows) => {
+      const mergedMap = new Map();
+      existingRows.forEach((item) => {
+        mergedMap.set(item.time, item);
+      });
+      newRows.forEach((item) => {
+        mergedMap.set(item.time, item);
+      });
+      return Array.from(mergedMap.values()).sort(
+        (a, b) => a.date.getTime() - b.date.getTime()
+      );
+    };
+
+    // FULL FETCH: limit 500 (for mount, range change, coin change, visibility after +1min, hourly)
+    const fetchIndicatorsFull = async () => {
+      if (isFetching || cancelled) return;
+      if (document.visibilityState === "hidden") return;
 
       isFetching = true;
       try {
-        const snapshot = await getDocs(indicatorQuery);
+        const fullQuery = query(
+          indicatorsRef,
+          where("time", ">=", startIso),
+          orderBy("time", "asc"),
+          limit(500)
+        );
+        const snapshot = await getDocs(fullQuery);
         if (cancelled) return;
 
-        const rows = snapshot.docs
-          .map((docSnap) => docSnap.data())
-          .map((item) => {
-            const iso =
-              typeof item?.time === "string"
-                ? item.time
-                : item?.time?.toDate?.()?.toISOString?.() ?? null;
-            if (!iso) return null;
-            const date = new Date(iso);
-            return {
-              ...item,
-              time: iso,
-              date,
-            };
-          })
-          .filter((item) => item !== null)
-          .sort((a, b) => a.date.getTime() - b.date.getTime());
-        
+        const rows = processDocs(snapshot.docs).sort(
+          (a, b) => a.date.getTime() - b.date.getTime()
+        );
+
         if (!cancelled) {
           setIndicatorData(rows);
           setIndicatorLoading(false);
+          lastFullFetchTime = Date.now();
         }
       } catch (err) {
         console.error(err);
@@ -529,26 +625,77 @@ export default function MarketDetailsPage() {
       }
     };
 
-    // Initial fetch
-    fetchIndicators();
+    // INCREMENTAL FETCH: limit 5 (for polling every 4s)
+    const fetchIndicatorsIncremental = async () => {
+      if (isFetching || cancelled) return;
+      if (document.visibilityState === "hidden") return;
 
-    // Poll every 4 seconds (configurable: 3-5 seconds)
-    intervalId = setInterval(() => {
-      fetchIndicators();
+      isFetching = true;
+      try {
+        const incrementalQuery = query(
+          indicatorsRef,
+          where("time", ">=", startIso),
+          orderBy("time", "desc"),
+          limit(5)
+        );
+        const snapshot = await getDocs(incrementalQuery);
+        if (cancelled) return;
+
+        const newRows = processDocs(snapshot.docs);
+        if (newRows.length === 0) {
+          isFetching = false;
+          return;
+        }
+
+        // Merge with existing indicator data
+        setIndicatorData((prevData) => {
+          return mergeAndSort(prevData, newRows);
+        });
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isFetching = false;
+      }
+    };
+
+    // Initial FULL fetch on mount
+    fetchIndicatorsFull();
+
+    // Polling every 4s: INCREMENTAL fetch (only 5 docs)
+    pollingIntervalId = setInterval(() => {
+      fetchIndicatorsIncremental();
     }, 4000);
 
-    // Also fetch when tab becomes visible
+    // Full refresh every hour (3600s)
+    fullRefreshIntervalId = setInterval(() => {
+      fetchIndicatorsFull();
+    }, 3600000);
+
+    // Handle visibility change
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible" && !isFetching && !cancelled) {
-        fetchIndicators();
+      if (cancelled) return;
+
+      if (document.visibilityState === "hidden") {
+        lastHiddenTime = Date.now();
+      } else if (document.visibilityState === "visible") {
+        // Full fetch if tab was hidden for more than 1 minute
+        if (lastHiddenTime && Date.now() - lastHiddenTime > 60000) {
+          if (!isFetching) {
+            fetchIndicatorsFull();
+          }
+        }
+        lastHiddenTime = null;
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      if (intervalId) {
-        clearInterval(intervalId);
+      if (pollingIntervalId) {
+        clearInterval(pollingIntervalId);
+      }
+      if (fullRefreshIntervalId) {
+        clearInterval(fullRefreshIntervalId);
       }
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
