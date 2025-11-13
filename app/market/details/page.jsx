@@ -5,7 +5,6 @@ import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
   doc,
-  getDocs,
   limit,
   onSnapshot,
   orderBy,
@@ -13,6 +12,8 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import { monitoredGetDocs } from "@/lib/firestore_monitored";
+import { monitor } from "@/lib/monitor";
 import {
   LineChart,
   Line,
@@ -312,7 +313,7 @@ export default function MarketDetailsPage() {
           orderBy("time", "asc"),
           limit(500)
         );
-        const snapshot = await getDocs(fullQuery);
+        const snapshot = await monitoredGetDocs(fullQuery);
         if (cancelled) return;
 
         const recordsMap = processDocs(snapshot.docs);
@@ -324,6 +325,11 @@ export default function MarketDetailsPage() {
           setHistory([...ordered]);
           setLoading(false);
           lastFullFetchTime = Date.now();
+          
+          // Track metrics
+          monitor.fullFetchCount++;
+          monitor.lastFullFetchTimestamp = Date.now();
+          monitor.pollingEvents++;
         }
       } catch (err) {
         console.error(err);
@@ -353,7 +359,7 @@ export default function MarketDetailsPage() {
           orderBy("time", "desc"),
           limit(5)
         );
-        const snapshot = await getDocs(incrementalQuery);
+        const snapshot = await monitoredGetDocs(incrementalQuery);
         if (cancelled) return;
 
         const newRecordsMap = processDocs(snapshot.docs);
@@ -370,6 +376,11 @@ export default function MarketDetailsPage() {
           });
           return mergeAndSort(existingMap, newRecordsMap);
         });
+
+        // Track metrics
+        monitor.incrementalFetchCount++;
+        monitor.lastIncrementalTimestamp = Date.now();
+        monitor.pollingEvents++;
       } catch (err) {
         console.error(err);
       } finally {
@@ -491,7 +502,7 @@ export default function MarketDetailsPage() {
           selectedCoin,
           "pivot_points"
         );
-        const snapshot = await getDocs(
+        const snapshot = await monitoredGetDocs(
           query(pivotsRef, orderBy("date", "desc"), limit(1))
         );
         if (!snapshot.empty) {
@@ -599,7 +610,7 @@ export default function MarketDetailsPage() {
           orderBy("time", "asc"),
           limit(500)
         );
-        const snapshot = await getDocs(fullQuery);
+        const snapshot = await monitoredGetDocs(fullQuery);
         if (cancelled) return;
 
         const rows = processDocs(snapshot.docs).sort(
@@ -610,6 +621,11 @@ export default function MarketDetailsPage() {
           setIndicatorData(rows);
           setIndicatorLoading(false);
           lastFullFetchTime = Date.now();
+          
+          // Track metrics
+          monitor.fullFetchCount++;
+          monitor.lastFullFetchTimestamp = Date.now();
+          monitor.pollingEvents++;
         }
       } catch (err) {
         console.error(err);
@@ -638,7 +654,7 @@ export default function MarketDetailsPage() {
           orderBy("time", "desc"),
           limit(5)
         );
-        const snapshot = await getDocs(incrementalQuery);
+        const snapshot = await monitoredGetDocs(incrementalQuery);
         if (cancelled) return;
 
         const newRows = processDocs(snapshot.docs);
@@ -651,6 +667,11 @@ export default function MarketDetailsPage() {
         setIndicatorData((prevData) => {
           return mergeAndSort(prevData, newRows);
         });
+
+        // Track metrics
+        monitor.incrementalFetchCount++;
+        monitor.lastIncrementalTimestamp = Date.now();
+        monitor.pollingEvents++;
       } catch (err) {
         console.error(err);
       } finally {
