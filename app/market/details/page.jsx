@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   collection,
@@ -247,6 +247,9 @@ export default function MarketDetailsPage() {
     };
   }, [user, selectedCoin]);
 
+  // Ref to track last timestamp for incremental fetch
+  const lastHistoryTimeRef = useRef(null);
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -259,11 +262,26 @@ export default function MarketDetailsPage() {
     setHistory([]);
     setLoading(true);
     setError(null);
+    lastHistoryTimeRef.current = null;
 
     const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
+    const rangeMs = range?.ms ?? DAY_MS;
     const now = new Date();
-    const start = new Date(now.getTime() - (range?.ms ?? 0));
+    const start = new Date(now.getTime() - rangeMs);
     const startIso = start.toISOString();
+
+    // Calculate dynamic fullLimit based on range
+    const getFullLimit = (rangeMs) => {
+      const oneHour = 60 * 60 * 1000;
+      const sixHours = 6 * oneHour;
+      const oneDay = 24 * oneHour;
+      
+      if (rangeMs <= oneHour) return 500;
+      if (rangeMs <= sixHours) return 1000;
+      if (rangeMs <= oneDay) return 2000;
+      return 5000; // upper bound
+    };
+    const fullLimit = getFullLimit(rangeMs);
 
     const historyRef = collection(
       doc(db, "crypto_prices", selectedCoin),
@@ -311,7 +329,7 @@ export default function MarketDetailsPage() {
         .map(({ originalDate, ...rest }) => rest);
     };
 
-    // FULL FETCH: limit 500 (for mount, range change, coin change, visibility after +1min, hourly)
+    // FULL FETCH: range-aware limit (for mount, range change, coin change, visibility after +1min, every 60min)
     const fetchHistoryFull = async () => {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
@@ -322,7 +340,7 @@ export default function MarketDetailsPage() {
           historyRef,
           where("time", ">=", startIso),
           orderBy("time", "asc"),
-          limit(500)
+          limit(fullLimit)
         );
         const snapshot = await monitoredGetDocs(fullQuery);
         if (cancelled) return;
@@ -339,6 +357,10 @@ export default function MarketDetailsPage() {
 
         if (!cancelled) {
           setHistory([...ordered]);
+          // Update ref with last timestamp
+          if (ordered.length > 0) {
+            lastHistoryTimeRef.current = ordered[ordered.length - 1]?.time || null;
+          }
           setLoading(false);
           lastFullFetchTime = Date.now();
           
@@ -362,18 +384,28 @@ export default function MarketDetailsPage() {
       }
     };
 
-    // INCREMENTAL FETCH: limit 5 (for polling every 4s)
+    // INCREMENTAL FETCH: append only new points (for polling every 30s)
     const fetchHistoryIncremental = async () => {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
       isFetching = true;
       try {
+        // Get last timestamp from ref
+        const localLastTime = lastHistoryTimeRef.current;
+        
+        // Skip incremental if no local data (let FULL handle it)
+        if (!localLastTime) {
+          isFetching = false;
+          return;
+        }
+
+        // Query for new points after last local timestamp
         const incrementalQuery = query(
           historyRef,
-          where("time", ">=", startIso),
-          orderBy("time", "desc"),
-          limit(5)
+          where("time", ">", localLastTime),
+          orderBy("time", "asc"),
+          limit(20) // max 20 new points per cycle
         );
         const snapshot = await monitoredGetDocs(incrementalQuery);
         if (cancelled) return;
@@ -384,13 +416,34 @@ export default function MarketDetailsPage() {
           return;
         }
 
-        // Merge with existing history
+        // Merge: append new points without removing existing ones
         setHistory((prevHistory) => {
           const existingMap = new Map();
           prevHistory.forEach((item) => {
-            existingMap.set(item.time, item);
+            if (item?.time) {
+              existingMap.set(item.time, item);
+            }
           });
-          return mergeAndSort(existingMap, newRecordsMap);
+          // Add new points
+          newRecordsMap.forEach((value, key) => {
+            existingMap.set(key, value);
+          });
+          // Return sorted array (only append, never shrink)
+          const merged = Array.from(existingMap.values())
+            .filter((item) => item?.originalDate instanceof Date)
+            .sort((a, b) => {
+              const timeA = a?.originalDate?.getTime?.() ?? 0;
+              const timeB = b?.originalDate?.getTime?.() ?? 0;
+              return timeA - timeB;
+            })
+            .map(({ originalDate, ...rest }) => rest);
+          
+          // Update ref with last timestamp
+          if (merged.length > 0) {
+            lastHistoryTimeRef.current = merged[merged.length - 1]?.time || null;
+          }
+          
+          return merged;
         });
 
         // Track metrics
@@ -407,15 +460,15 @@ export default function MarketDetailsPage() {
     // Initial FULL fetch on mount
     fetchHistoryFull();
 
-    // Polling every 4s: INCREMENTAL fetch (only 5 docs)
+    // Polling every 30s: INCREMENTAL fetch (append new points only)
     pollingIntervalId = setInterval(() => {
       fetchHistoryIncremental();
-    }, 4000);
+    }, 30000); // 30 seconds
 
-    // Full refresh every hour (3600s)
+    // Full refresh every 60 minutes
     fullRefreshIntervalId = setInterval(() => {
       fetchHistoryFull();
-    }, 3600000);
+    }, 3600000); // 60 minutes
 
     // Handle visibility change
     const handleVisibilityChange = () => {
@@ -551,11 +604,15 @@ export default function MarketDetailsPage() {
     };
   }, [user, layerState.pivot, selectedCoin]);
 
+  // Ref to track last timestamp for incremental fetch (indicators)
+  const lastIndicatorTimeRef = useRef(null);
+
   useEffect(() => {
     if (!user || !indicatorEnabled || !supportsIndicatorRange) {
       setIndicatorData([]);
       setIndicatorError(null);
       setIndicatorLoading(false);
+      lastIndicatorTimeRef.current = null;
       return;
     }
 
@@ -568,11 +625,26 @@ export default function MarketDetailsPage() {
 
     setIndicatorLoading(true);
     setIndicatorError(null);
+    lastIndicatorTimeRef.current = null;
 
     const range = RANGE_OPTIONS.find((r) => r.value === selectedRange);
+    const rangeMs = range?.ms ?? DAY_MS;
     const now = new Date();
-    const start = new Date(now.getTime() - (range?.ms ?? 0));
+    const start = new Date(now.getTime() - rangeMs);
     const startIso = start.toISOString();
+
+    // Calculate dynamic fullLimit based on range
+    const getFullLimit = (rangeMs) => {
+      const oneHour = 60 * 60 * 1000;
+      const sixHours = 6 * oneHour;
+      const oneDay = 24 * oneHour;
+      
+      if (rangeMs <= oneHour) return 500;
+      if (rangeMs <= sixHours) return 1000;
+      if (rangeMs <= oneDay) return 2000;
+      return 5000; // upper bound
+    };
+    const fullLimit = getFullLimit(rangeMs);
 
     const indicatorsRef = collection(
       doc(db, "crypto_prices", selectedCoin),
@@ -621,7 +693,7 @@ export default function MarketDetailsPage() {
         });
     };
 
-    // FULL FETCH: limit 500 (for mount, range change, coin change, visibility after +1min, hourly)
+    // FULL FETCH: range-aware limit (for mount, range change, coin change, visibility after +1min, every 60min)
     const fetchIndicatorsFull = async () => {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
@@ -632,7 +704,7 @@ export default function MarketDetailsPage() {
           indicatorsRef,
           where("time", ">=", startIso),
           orderBy("time", "asc"),
-          limit(500)
+          limit(fullLimit)
         );
         const snapshot = await monitoredGetDocs(fullQuery);
         if (cancelled) return;
@@ -647,6 +719,10 @@ export default function MarketDetailsPage() {
 
         if (!cancelled) {
           setIndicatorData(rows);
+          // Update ref with last timestamp
+          if (rows.length > 0) {
+            lastIndicatorTimeRef.current = rows[rows.length - 1]?.time || null;
+          }
           setIndicatorLoading(false);
           lastFullFetchTime = Date.now();
           
@@ -669,18 +745,28 @@ export default function MarketDetailsPage() {
       }
     };
 
-    // INCREMENTAL FETCH: limit 5 (for polling every 4s)
+    // INCREMENTAL FETCH: append only new points (for polling every 30s)
     const fetchIndicatorsIncremental = async () => {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
       isFetching = true;
       try {
+        // Get last timestamp from ref
+        const localLastTime = lastIndicatorTimeRef.current;
+        
+        // Skip incremental if no local data (let FULL handle it)
+        if (!localLastTime) {
+          isFetching = false;
+          return;
+        }
+
+        // Query for new points after last local timestamp
         const incrementalQuery = query(
           indicatorsRef,
-          where("time", ">=", startIso),
-          orderBy("time", "desc"),
-          limit(5)
+          where("time", ">", localLastTime),
+          orderBy("time", "asc"),
+          limit(20) // max 20 new points per cycle
         );
         const snapshot = await monitoredGetDocs(incrementalQuery);
         if (cancelled) return;
@@ -691,9 +777,35 @@ export default function MarketDetailsPage() {
           return;
         }
 
-        // Merge with existing indicator data
+        // Merge: append new points without removing existing ones
         setIndicatorData((prevData) => {
-          return mergeAndSort(prevData, newRows);
+          const mergedMap = new Map();
+          prevData.forEach((item) => {
+            if (item?.time) {
+              mergedMap.set(item.time, item);
+            }
+          });
+          // Add new points
+          newRows.forEach((item) => {
+            if (item?.time) {
+              mergedMap.set(item.time, item);
+            }
+          });
+          // Return sorted array (only append, never shrink)
+          const merged = Array.from(mergedMap.values())
+            .filter((item) => item?.date instanceof Date)
+            .sort((a, b) => {
+              const timeA = a?.date?.getTime?.() ?? 0;
+              const timeB = b?.date?.getTime?.() ?? 0;
+              return timeA - timeB;
+            });
+          
+          // Update ref with last timestamp
+          if (merged.length > 0) {
+            lastIndicatorTimeRef.current = merged[merged.length - 1]?.time || null;
+          }
+          
+          return merged;
         });
 
         // Track metrics
@@ -710,15 +822,15 @@ export default function MarketDetailsPage() {
     // Initial FULL fetch on mount
     fetchIndicatorsFull();
 
-    // Polling every 4s: INCREMENTAL fetch (only 5 docs)
+    // Polling every 30s: INCREMENTAL fetch (append new points only)
     pollingIntervalId = setInterval(() => {
       fetchIndicatorsIncremental();
-    }, 4000);
+    }, 30000); // 30 seconds
 
-    // Full refresh every hour (3600s)
+    // Full refresh every 60 minutes
     fullRefreshIntervalId = setInterval(() => {
       fetchIndicatorsFull();
-    }, 3600000);
+    }, 3600000); // 60 minutes
 
     // Handle visibility change
     const handleVisibilityChange = () => {
