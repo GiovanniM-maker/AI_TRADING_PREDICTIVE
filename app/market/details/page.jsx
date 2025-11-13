@@ -314,28 +314,28 @@ export default function MarketDetailsPage() {
 
     // Helper: process documents into records map
     const processDocs = (docs) => {
-      const recordsMap = new Map();
+        const recordsMap = new Map();
       docs.forEach((docSnap) => {
-        const data = docSnap.data();
-        const price =
-          typeof data?.close === "number"
-            ? data.close
-            : typeof data?.close_usd === "number"
-            ? data.close_usd
-            : null;
-        const iso =
-          typeof data?.time === "string"
-            ? data.time
-            : data?.time?.toDate?.()?.toISOString?.() ?? null;
-        if (price === null || !iso) return;
-        const pointDate = new Date(iso);
-        recordsMap.set(iso, {
-          close: price,
-          time: iso,
-          date: truncateDate(pointDate, getBucketType(selectedRange)),
-          originalDate: pointDate,
+          const data = docSnap.data();
+          const price =
+            typeof data?.close === "number"
+              ? data.close
+              : typeof data?.close_usd === "number"
+              ? data.close_usd
+              : null;
+          const iso =
+            typeof data?.time === "string"
+              ? data.time
+              : data?.time?.toDate?.()?.toISOString?.() ?? null;
+          if (price === null || !iso) return;
+          const pointDate = new Date(iso);
+          recordsMap.set(iso, {
+            close: price,
+            time: iso,
+            date: truncateDate(pointDate, getBucketType(selectedRange)),
+            originalDate: pointDate,
+          });
         });
-      });
       return recordsMap;
     };
 
@@ -358,6 +358,7 @@ export default function MarketDetailsPage() {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
+      console.log("[DETAILS] full fetch triggered", { selectedCoin, selectedRange });
       isFetching = true;
       try {
         console.log("[FULL FETCH] Starting full fetch for", selectedCoin, selectedRange);
@@ -378,7 +379,8 @@ export default function MarketDetailsPage() {
             // Track metrics (cache load)
             monitor.fullFetchCount++;
             monitor.lastFullFetchTimestamp = Date.now();
-            console.log("[MONITOR]", { fullFetchCount: monitor.fullFetchCount, cacheReads: monitor.cacheReads });
+            console.log("[MONITOR] After cache hit - fullFetchCount:", monitor.fullFetchCount, "cacheReads:", monitor.cacheReads);
+            console.log("[MONITOR] Full monitor object:", monitor);
             
             // Trigger incremental fetch immediately to get latest data
             isFetching = false;
@@ -411,12 +413,12 @@ export default function MarketDetailsPage() {
         console.log("[FULL FETCH] Fetched", ordered.length, "points from Firestore");
 
         if (!cancelled) {
-          setHistory([...ordered]);
+        setHistory([...ordered]);
           // Update ref with last timestamp
           if (ordered.length > 0) {
             lastHistoryTimeRef.current = ordered[ordered.length - 1]?.time || null;
           }
-          setLoading(false);
+        setLoading(false);
           lastFullFetchTime = Date.now();
           
           // Save to cache
@@ -426,11 +428,8 @@ export default function MarketDetailsPage() {
           monitor.fullFetchCount++;
           monitor.lastFullFetchTimestamp = Date.now();
           monitor.pollingEvents++;
-          console.log("[MONITOR]", { 
-            fullFetchCount: monitor.fullFetchCount, 
-            firestoreReads: monitor.firestoreReads,
-            cacheWrites: monitor.cacheWrites 
-          });
+          console.log("[MONITOR] After Firestore fetch - fullFetchCount:", monitor.fullFetchCount, "firestoreReads:", monitor.firestoreReads, "cacheWrites:", monitor.cacheWrites);
+          console.log("[MONITOR] Full monitor object:", monitor);
         }
       } catch (err) {
         console.error("[FULL FETCH] Error:", err);
@@ -452,6 +451,7 @@ export default function MarketDetailsPage() {
       if (isFetching || cancelled) return;
       if (document.visibilityState === "hidden") return;
 
+      console.log("[DETAILS] incremental fetch triggered", { selectedCoin, selectedRange });
       isFetching = true;
       try {
         console.log("[INCREMENTAL] Starting incremental fetch for", selectedCoin, selectedRange);
@@ -551,11 +551,8 @@ export default function MarketDetailsPage() {
         monitor.incrementalFetchCount++;
         monitor.lastIncrementalTimestamp = Date.now();
         monitor.pollingEvents++;
-        console.log("[MONITOR]", { 
-          incrementalFetchCount: monitor.incrementalFetchCount, 
-          firestoreReads: monitor.firestoreReads,
-          cacheWrites: monitor.cacheWrites 
-        });
+        console.log("[MONITOR] After incremental fetch - incrementalFetchCount:", monitor.incrementalFetchCount, "firestoreReads:", monitor.firestoreReads, "cacheWrites:", monitor.cacheWrites);
+        console.log("[MONITOR] Full monitor object:", monitor);
       } catch (err) {
         console.error("[INCREMENTAL] Error:", err);
       } finally {
@@ -762,20 +759,20 @@ export default function MarketDetailsPage() {
     // Helper: process documents into rows
     const processDocs = (docs) => {
       return docs
-        .map((docSnap) => docSnap.data())
-        .map((item) => {
-          const iso =
-            typeof item?.time === "string"
-              ? item.time
-              : item?.time?.toDate?.()?.toISOString?.() ?? null;
-          if (!iso) return null;
-          const date = new Date(iso);
-          return {
-            ...item,
-            time: iso,
-            date,
-          };
-        })
+          .map((docSnap) => docSnap.data())
+          .map((item) => {
+            const iso =
+              typeof item?.time === "string"
+                ? item.time
+                : item?.time?.toDate?.()?.toISOString?.() ?? null;
+            if (!iso) return null;
+            const date = new Date(iso);
+            return {
+              ...item,
+              time: iso,
+              date,
+            };
+          })
         .filter((item) => item !== null);
     };
 
@@ -850,12 +847,12 @@ export default function MarketDetailsPage() {
           });
 
         if (!cancelled) {
-          setIndicatorData(rows);
+        setIndicatorData(rows);
           // Update ref with last timestamp
           if (rows.length > 0) {
             lastIndicatorTimeRef.current = rows[rows.length - 1]?.time || null;
           }
-          setIndicatorLoading(false);
+        setIndicatorLoading(false);
           lastFullFetchTime = Date.now();
           
           // Save to cache
