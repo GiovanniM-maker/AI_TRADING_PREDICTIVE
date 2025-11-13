@@ -20,11 +20,11 @@ function formatDate(timestamp) {
   return new Date(timestamp).toLocaleString();
 }
 
-// Safe copy function to avoid reference issues
+// Safe copy function - reads DIRECTLY from the shared monitor object
 function getMonitorSnapshot() {
-  // Ensure monitor is accessible
+  // Ensure monitor is accessible and is the shared instance
   if (typeof monitor === "undefined") {
-    console.error("[Monitor] monitor object is undefined!");
+    console.error("[MONITOR PAGE] monitor object is undefined!");
     return {
       firestoreReads: 0,
       firestoreWrites: 0,
@@ -45,6 +45,19 @@ function getMonitorSnapshot() {
     };
   }
   
+  // Log monitor reference to verify it's the same object
+  if (typeof window !== "undefined" && window.__MONITOR_REF_CHECK__) {
+    if (monitor !== window.__MONITOR_REF_CHECK__) {
+      console.error("[MONITOR PAGE] WARNING: Different monitor instance detected!");
+    } else {
+      console.log("[MONITOR PAGE] Monitor ref verified - same instance");
+    }
+  } else if (typeof window !== "undefined") {
+    window.__MONITOR_REF_CHECK__ = monitor;
+    console.log("[MONITOR PAGE] Monitor ref stored for verification:", monitor);
+  }
+  
+  // Read DIRECTLY from the shared monitor object
   return {
     firestoreReads: monitor.firestoreReads || 0,
     firestoreWrites: monitor.firestoreWrites || 0,
@@ -75,24 +88,42 @@ export default function MonitorPage() {
     // Initialize heartbeat on mount
     if (typeof monitor !== "undefined") {
       monitor.lastFrontendHeartbeat = Date.now();
-      // Debug: log monitor state
-      console.log("[Monitor] Initial state:", {
+      
+      // Verify monitor reference
+      console.log("[MONITOR PAGE] Monitor ref on mount:", monitor);
+      console.log("[MONITOR PAGE] Monitor values:", {
         firestoreReads: monitor.firestoreReads,
+        cacheReads: monitor.cacheReads,
+        cacheWrites: monitor.cacheWrites,
         fullFetchCount: monitor.fullFetchCount,
         incrementalFetchCount: monitor.incrementalFetchCount,
       });
     }
     
     // Update state immediately
-    setState(getMonitorSnapshot());
+    const initialSnapshot = getMonitorSnapshot();
+    console.log("[MONITOR PAGE] Initial snapshot:", initialSnapshot);
+    setState(initialSnapshot);
     
-    // Then update every 1 second
+    // Then update every 1 second - read DIRECTLY from monitor
     const id = setInterval(() => {
       try {
         const snapshot = getMonitorSnapshot();
-        setState(snapshot);
+        // Log if values changed
+        setState((prevState) => {
+          if (prevState.firestoreReads !== snapshot.firestoreReads ||
+              prevState.cacheReads !== snapshot.cacheReads ||
+              prevState.cacheWrites !== snapshot.cacheWrites) {
+            console.log("[MONITOR PAGE] Values updated:", {
+              firestoreReads: snapshot.firestoreReads,
+              cacheReads: snapshot.cacheReads,
+              cacheWrites: snapshot.cacheWrites,
+            });
+          }
+          return snapshot;
+        });
       } catch (err) {
-        console.error("Error updating monitor state:", err);
+        console.error("[MONITOR PAGE] Error updating monitor state:", err);
       }
     }, 1000);
     return () => clearInterval(id);

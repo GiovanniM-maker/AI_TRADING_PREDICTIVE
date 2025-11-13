@@ -22,6 +22,20 @@ import {
   saveIndicators,
   appendIndicators,
 } from "@/lib/cache_market";
+
+// Log monitor reference (for debugging)
+if (typeof window !== "undefined") {
+  console.log("[MARKET DETAILS] Monitor ref:", monitor);
+  if (window.__MONITOR_REF_CHECK__) {
+    if (monitor !== window.__MONITOR_REF_CHECK__) {
+      console.error("[MARKET DETAILS] WARNING: Different monitor instance!");
+    } else {
+      console.log("[MARKET DETAILS] Monitor ref verified - same instance");
+    }
+  } else {
+    window.__MONITOR_REF_CHECK__ = monitor;
+  }
+}
 import {
   LineChart,
   Line,
